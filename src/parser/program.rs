@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{instruction::Instruction, lexer::token::Token};
+use crate::{instruction::Instruction, lexer::token::Token, operand::Operand};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Program {
@@ -36,14 +36,18 @@ impl Program {
                         // mark the location at which the label is located at, use instructions.len()
                         labels.insert(l, instructions.len());
                     }
-                    Token::Directive(d) => todo!(),
+                    Token::Directive(_) => todo!(),
                     Token::Expression(e) => {
+                        let lhs = match e.lhs {
+                            Some(lhs) => lhs.try_into()?,
+                            None => Operand::None,
+                        };
+                        let rhs = match e.rhs {
+                            Some(rhs) => rhs.try_into()?,
+                            None => Operand::None,
+                        };
                         let instruction =
-                            Instruction::new(e.opcode.into(), e.lhs.try_into()?, e.rhs.try_into()?);
-                        instructions.push(instruction);
-                    }
-                    Token::LExpression(e) => {
-                        let instruction = Instruction::new_l(e.opcode.into(), e.lhs.try_into()?);
+                            Instruction::new(e.opcode.into(), lhs, rhs);
                         instructions.push(instruction);
                     }
                     _ => (),
@@ -79,13 +83,13 @@ mod test {
             Program::new(vec![
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: "ra".to_string(),
-                    rhs: "1".to_string(),
+                    lhs: Some("ra".to_string()),
+                    rhs: Some("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: "ra".to_string(),
-                    rhs: "rb".to_string(),
+                    lhs: Some("ra".to_string()),
+                    rhs: Some("rb".to_string()),
                 })],
             ]),
             Program {
@@ -109,13 +113,13 @@ mod test {
                 vec![Token::Label("start".to_string())],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: "ra".to_string(),
-                    rhs: "1".to_string(),
+                    lhs: Some("ra".to_string()),
+                    rhs: Some("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: "ra".to_string(),
-                    rhs: "rb".to_string(),
+                    lhs: Some("ra".to_string()),
+                    rhs: Some("rb".to_string()),
                 })],
                 vec![Token::Label("end".to_string())],
             ]),

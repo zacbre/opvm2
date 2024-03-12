@@ -8,9 +8,12 @@ pub enum Opcode {
     Div,
     Mod,
     Xor,
+    Inc,
+    Dec,
     /* Stack */
     Push,
     Pop,
+    Dup,
     /* Program Flow */
     Test,
     Jmp,
@@ -23,7 +26,10 @@ pub enum Opcode {
     Call,
     Return,
     /* Various */
+    Assert,
     Print,
+    Nop,
+    Hlt,
 }
 
 impl From<String> for Opcode {
@@ -36,8 +42,11 @@ impl From<String> for Opcode {
             "div" => Self::Div,
             "mod" => Self::Mod,
             "xor" => Self::Xor,
+            "inc" => Self::Inc,
+            "dec" => Self::Dec,
             "push" => Self::Push,
             "pop" => Self::Pop,
+            "dup" => Self::Dup,
             "test" => Self::Test,
             "jmp" => Self::Jmp,
             "je" => Self::Je,
@@ -47,8 +56,11 @@ impl From<String> for Opcode {
             "jl" => Self::Jl,
             "jg" => Self::Jg,
             "call" => Self::Call,
-            "return" => Self::Return,
+            "ret" => Self::Return,
+            "assert" => Self::Assert,
             "print" => Self::Print,
+            "nop" => Self::Nop,
+            "hlt" => Self::Hlt,
             _ => panic!("Invalid opcode"),
             // todo: add ability to extend with extism?
         }

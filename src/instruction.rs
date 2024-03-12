@@ -19,4 +19,12 @@ impl Instruction {
             rhs: Operand::None,
         }
     }
+
+    pub fn new_e(opcode: Opcode) -> Instruction {
+        Instruction {
+            opcode,
+            lhs: Operand::None,
+            rhs: Operand::None,
+        }
+    }
 }

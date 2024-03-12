@@ -1,6 +1,6 @@
 pub mod token;
 
-use self::token::{Expression, LExpression, Token, TokenType};
+use self::token::{Expression, Token, TokenType};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
@@ -116,8 +116,16 @@ fn expression(i: &str) -> IResult<&str, Token> {
     // this expression needs an opcode, and then operands, potentially registers or literals.
     let (i, opcode) = preceded(
         opt(whitespace),
-        terminated(take_until_whitespace, opt(tag(" "))),
+        terminated(take_until_whitespace, opt(whitespace)),
     )(i)?;
+
+    if i.trim().len() == 0 {
+        return Ok((i, Token::Expression(Expression {
+            opcode: opcode.to_string(),
+            lhs: None,
+            rhs: None,
+        })));
+    }
 
     let (i, token) = if let Ok((i, lhs)) = preceded(
         opt(whitespace),
@@ -133,17 +141,18 @@ fn expression(i: &str) -> IResult<&str, Token> {
             i,
             Token::Expression(Expression {
                 opcode: opcode.to_string(),
-                lhs: lhs.to_string(),
-                rhs: rhs.to_string(),
+                lhs: Some(lhs.to_string()),
+                rhs: Some(rhs.to_string()),
             }),
         )
     } else {
         let (i, lhs) = preceded(opt(whitespace), alt((literal, take_until_whitespace)))(i)?;
         (
             i,
-            Token::LExpression(LExpression {
+            Token::Expression(Expression {
                 opcode: opcode.to_string(),
-                lhs: lhs.to_string(),
+                lhs: Some(lhs.to_string()),
+                rhs: None,
             }),
         )
     };
@@ -164,7 +173,7 @@ fn directive(i: &str) -> IResult<&str, &str> {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::token::{Expression, LExpression, Token};
+    use crate::lexer::token::{Expression, Token};
 
     #[test]
     fn can_parse_comments() {
@@ -256,8 +265,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "mov".to_string(),
-                    lhs: "rax".to_string(),
-                    rhs: "rdx".to_string()
+                    lhs: Some("rax".to_string()),
+                    rhs: Some("rdx".to_string())
                 })
             ))
         );
@@ -268,8 +277,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "mov".to_string(),
-                    lhs: "rax".to_string(),
-                    rhs: "a".to_string()
+                    lhs: Some("rax".to_string()),
+                    rhs: Some("a".to_string())
                 })
             ))
         );
@@ -278,9 +287,22 @@ mod test {
             super::expression("print rax"),
             Ok((
                 "",
-                super::Token::LExpression(super::LExpression {
+                super::Token::Expression(super::Expression {
                     opcode: "print".to_string(),
-                    lhs: "rax".to_string(),
+                    lhs: Some("rax".to_string()),
+                    rhs: None
+                })
+            ))
+        );
+
+        assert_eq!(
+            super::expression("ret  "),
+            Ok((
+                "",
+                super::Token::Expression(super::Expression {
+                    opcode: "ret".to_string(),
+                    lhs: None,
+                    rhs: None
                 })
             ))
         );
@@ -296,8 +318,8 @@ mod test {
                     super::Token::Label("label".to_string()),
                     super::Token::Expression(super::Expression {
                         opcode: "mov".to_string(),
-                        lhs: "r0".to_string(),
-                        rhs: "a".to_string()
+                        lhs: Some("r0".to_string()),
+                        rhs: Some("a".to_string())
                     }),
                     super::Token::Comment("comment".to_string())
                 ]
@@ -322,18 +344,19 @@ mod test {
                     Token::Label("label".to_string()),
                     Token::Expression(Expression {
                         opcode: "mov".to_string(),
-                        lhs: "rax".to_string(),
-                        rhs: "0".to_string()
+                        lhs: Some("rax".to_string()),
+                        rhs: Some("0".to_string())
                     })
                 ],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: "rcx".to_string(),
-                    rhs: "a".to_string()
+                    lhs: Some("rcx".to_string()),
+                    rhs: Some("a".to_string())
                 })],
-                vec![Token::LExpression(LExpression {
+                vec![Token::Expression(Expression {
                     opcode: "print".to_string(),
-                    lhs: "rcx".to_string()
+                    lhs: Some("rcx".to_string()),
+                    rhs: None
                 })]
             ])
         );

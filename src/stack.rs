@@ -23,6 +23,10 @@ impl<T> Stack<T> {
         self.0.pop()
     }
 
+    pub fn peek(&self) -> Option<&T> {
+        self.0.last()
+    }
+
     pub fn to_vec(&self) -> &Vec<T> {
         &self.0
     }

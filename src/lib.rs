@@ -27,6 +27,32 @@ mod test {
     }
 
     #[test]
+    fn can_inc() {
+        let mut vm = super::vm::Vm::new();
+        let program = Program::from(
+            r"
+            mov ra, 1
+            inc ra
+        ",
+        );
+        vm.run(program).unwrap();
+        assert_eq!(vm.registers.get(&crate::register::Register::Ra), 2);
+    }
+
+    #[test]
+    fn can_dec() {
+        let mut vm = super::vm::Vm::new();
+        let program = Program::from(
+            r"
+            mov ra, 1
+            dec ra
+        ",
+        );
+        vm.run(program).unwrap();
+        assert_eq!(vm.registers.get(&crate::register::Register::Ra), 0);
+    }
+
+    #[test]
     fn can_xor_two_numbers() {
         let mut vm = super::vm::Vm::new();
         let program = Program::from(
@@ -38,6 +64,37 @@ mod test {
         );
         vm.run(program).unwrap();
         assert_eq!(vm.registers.get(&crate::register::Register::Ra), 6);
+    }
+
+    #[test]
+    fn can_push_and_pop() {
+        let mut vm = super::vm::Vm::new();
+        let program = Program::from(
+            r"
+            mov ra, 1
+            push ra
+            pop rb
+        ",
+        );
+        vm.run(program).unwrap();
+        assert_eq!(vm.registers.get(&crate::register::Register::Rb), 1);
+    }
+
+    #[test]
+    fn can_dup_stack() {
+        let mut vm = super::vm::Vm::new();
+        let program = Program::from(
+            r"
+            mov ra, 5
+            push ra
+            dup
+            pop rb
+            pop rc
+        ",
+        );
+        vm.run(program).unwrap();
+        assert_eq!(vm.registers.get(&crate::register::Register::Rb), 5);
+        assert_eq!(vm.registers.get(&crate::register::Register::Rc), 5);
     }
 
     #[test]
@@ -190,5 +247,27 @@ mod test {
         );
         vm.run(program).unwrap();
         assert_eq!(vm.registers.get(&crate::register::Register::Rc), 10);
+    }
+
+    #[test]
+    fn can_call_and_return() {
+        let mut vm = super::vm::Vm::new();
+        let program = Program::from(
+            r"
+            call add
+            jmp exit
+            _add: mov ra, 3
+            mov rb, 4
+            add ra, rb
+            ret
+            mov rc, 5
+            _exit:
+            mov rd, 6
+        ",
+        );
+        vm.run(program).unwrap();
+        assert_eq!(vm.registers.get(&crate::register::Register::Ra), 7);
+        assert_eq!(vm.registers.get(&crate::register::Register::Rd), 6);
+        assert_ne!(vm.registers.get(&crate::register::Register::Rc), 5);
     }
 }
