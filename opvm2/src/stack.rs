@@ -1,4 +1,8 @@
-#[derive(Debug, PartialEq)]
+use extism_pdk::{FromBytes, Json};
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize, Clone, PartialEq, FromBytes)]
+#[encoding(Json)]
 pub struct Stack<T>(Vec<T>);
 
 impl<T> Stack<T> {

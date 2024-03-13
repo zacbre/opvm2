@@ -120,11 +120,14 @@ fn expression(i: &str) -> IResult<&str, Token> {
     )(i)?;
 
     if i.trim().len() == 0 {
-        return Ok((i, Token::Expression(Expression {
-            opcode: opcode.to_string(),
-            lhs: None,
-            rhs: None,
-        })));
+        return Ok((
+            i,
+            Token::Expression(Expression {
+                opcode: opcode.to_string(),
+                lhs: None,
+                rhs: None,
+            }),
+        ));
     }
 
     let (i, token) = if let Ok((i, lhs)) = preceded(

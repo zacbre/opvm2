@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 
+use extism_pdk::{FromBytes, Json};
+use serde::Deserialize;
+
 use crate::{instruction::Instruction, lexer::token::Token, operand::Operand};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Clone, FromBytes)]
+#[encoding(Json)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
     pub labels: HashMap<String, usize>,
@@ -46,8 +50,7 @@ impl Program {
                             Some(rhs) => rhs.try_into()?,
                             None => Operand::None,
                         };
-                        let instruction =
-                            Instruction::new(e.opcode.into(), lhs, rhs);
+                        let instruction = Instruction::new(e.opcode.into(), lhs, rhs);
                         instructions.push(instruction);
                     }
                     _ => (),
@@ -60,7 +63,7 @@ impl Program {
         })
     }
 
-    pub(crate) fn empty() -> Program {
+    pub fn empty() -> Program {
         Program {
             instructions: vec![],
             labels: Default::default(),

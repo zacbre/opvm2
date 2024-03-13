@@ -1,4 +1,8 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+use extism_pdk::{FromBytes, Json, ToBytes};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, FromBytes, ToBytes)]
+#[encoding(Json)]
 pub enum Register {
     Ra,
     Rb,
@@ -45,7 +49,8 @@ macro_rules! flag_register {
     };
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, FromBytes, Clone)]
+#[encoding(Json)]
 pub struct Registers {
     pub ra: u64,
     pub rb: u64,
@@ -148,11 +153,11 @@ impl Registers {
     flag_register!(call_stack_len, u64);
     flag_register!(pc, u64);
 
-    pub(crate) fn increment_pc(&mut self) {
+    pub fn increment_pc(&mut self) {
         self.pc += 1;
     }
 
-    pub(crate) fn reset_flags(&mut self) {
+    pub fn reset_flags(&mut self) {
         self.equals_flag = false;
         self.greater_than_flag = false;
         self.less_than_flag = false;

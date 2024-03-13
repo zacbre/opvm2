@@ -1,0 +1,14 @@
+[package]
+name = "opvm2_vm"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+extism = "1.2.0"
+opvm2 = { path = "../opvm2" }
+serde = { version = "1.0.197", features = ["derive"] }
+
+[dev-dependencies]
+test-case = "3.3.1"
