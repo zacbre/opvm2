@@ -28,7 +28,7 @@ extern "ExtismHost" {
     pub fn jmp_to_label(label: String);
     pub fn get_labels() -> Labels;
     pub fn quit();
-
+    pub fn print(value: String);
     // todo: add a function to execute instructions within the vm...perhaps we have to patch current_program
     //pub fn execute_instruction(Json(ins): Json<OnInstructionValue>) -> Option<u64>;
 }

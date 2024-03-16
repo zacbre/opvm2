@@ -48,4 +48,11 @@ impl Operand {
             _ => Err(format!("Register not valid: {:?}", self)),
         }
     }
+
+    pub fn get_number(&self) -> Result<u64, String> {
+        match self {
+            Operand::N(number) => Ok(*number),
+            _ => Err(format!("Number not valid: {:?}", self)),
+        }
+    }
 }

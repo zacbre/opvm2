@@ -1,7 +1,7 @@
 use extism_pdk::*;
 use opvm2::{
     plugin_interface::{
-        all_registers, get_input, get_labels, quit, set_register, OnInstructionValue,
+        all_registers, get_input, get_labels, print, quit, set_register, OnInstructionValue,
     },
     register::Register,
 };
@@ -13,7 +13,7 @@ pub fn name() -> FnResult<String> {
 
 // todo: handle_error should be implemented
 // todo: also implement handle_post_instruction
-//
+
 static mut BREAKPOINTS: Vec<u64> = vec![];
 static mut STEP: bool = true;
 
@@ -21,15 +21,15 @@ static mut STEP: bool = true;
 pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
     // let us use a basic interpreter, powered by the VM itself? whoa
     loop {
-        info!("{:#02x}", ins.pc);
         unsafe {
             if BREAKPOINTS.contains(&ins.pc) {
-                info!("Breakpoint hit at {}", ins.pc);
+                print(format!("Breakpoint hit at {}!\n", ins.pc))?;
                 STEP = true;
             } else if !STEP {
                 return Ok(None);
             }
         }
+        unsafe { print(format!("{:#02x}: ", ins.pc))? };
 
         let input = unsafe { get_input()? };
         let input = input.trim_end_matches('\n');
@@ -37,7 +37,7 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
             let bp = input.split_whitespace().nth(1).unwrap();
             let pc: u64 = bp.parse::<u64>()?;
             unsafe { BREAKPOINTS.push(pc) };
-            info!("Added breakpoint at {}", bp);
+            unsafe { print(format!("Added breakpoint at {}\n", bp))? }
             continue;
         }
         if input.starts_with("dbp") {
@@ -45,11 +45,11 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
             let pc: u64 = bp.parse::<u64>()?;
             let index = unsafe { BREAKPOINTS.iter().position(|&x| x == pc) };
             if index.is_none() {
-                info!("Breakpoint not found!");
+                unsafe { print(format!("Breakpoint not found!\n"))? };
                 continue;
             }
             unsafe { BREAKPOINTS.remove(index.unwrap()) };
-            info!("Removed breakpoint at {}", bp);
+            unsafe { print(format!("Removed breakpoint at {}\n", bp))? }
             continue;
         }
         if input.starts_with("set") {
@@ -58,13 +58,13 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
             let p_register = input.next().unwrap().to_string();
             let result = Register::try_from(p_register.clone());
             if result.is_err() {
-                info!("Invalid register `{}`!", p_register);
+                unsafe { print(format!("Invalid register `{}`!\n", p_register))? }
                 continue;
             }
             let register = result.unwrap();
             let value = input.next().unwrap().parse().unwrap();
             unsafe { set_register(register, value)? };
-            info!("Set register {} to {}!", p_register, value);
+            unsafe { print(format!("Set register {} to {}!\n", p_register, value))? }
             continue;
         }
         match input {
@@ -77,19 +77,19 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
                 return Ok(None);
             }
             "print" | "p" => {
-                info!("Instruction: {:?}", ins);
+                unsafe { print(format!("Instruction: {:?}\n", ins))? };
             }
             "registers" | "r" => {
-                info!("{:?}", unsafe { all_registers()? });
+                unsafe { print(format!("{:?}\n", all_registers()?))? };
             }
             "labels" | "l" => {
-                info!("{:?}", unsafe { get_labels()? });
+                unsafe { print(format!("{:?}\n", get_labels()?))? };
             }
             "quit" | "q" => {
                 unsafe { quit()? };
             }
             _ => {
-                info!("Unknown command!");
+                unsafe { print(format!("Unknown command!\n"))? };
             }
         }
     }

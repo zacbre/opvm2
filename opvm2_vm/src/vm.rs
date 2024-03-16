@@ -47,8 +47,6 @@ impl Vm {
             let mut store = store.lock().unwrap();
             store.current_program = program.clone();
         }
-        //let plugin_loader = self.load_plugins();
-        println!("{:?}", program.instructions);
         'outer: while (self.check_pc() as usize) < program.instructions.len() {
             let pc = self.check_pc();
             let item = &program.instructions[pc as usize];
@@ -70,7 +68,7 @@ impl Vm {
                         continue 'outer;
                     }
                 }
-                Err(_) => (),
+                Err(e) => return Err(e),
             };
 
             let store = self.store.get().map_err(|e| e.to_string()).unwrap();
@@ -187,7 +185,7 @@ impl Vm {
                     ));
                 }
                 Opcode::Nop => {}
-                Opcode::Hlt => {
+                Opcode::Halt => {
                     return Ok(());
                 }
                 Opcode::Plugin(s) => {
@@ -197,6 +195,8 @@ impl Vm {
             }
             store.registers.increment_pc();
         }
+        // bug in rust perhaps? using print! causes a % to be outputted if no newline is printed afterwards.
+        println!("");
         Ok(())
     }
 
@@ -662,7 +662,7 @@ mod test {
     #[test]
     fn can_halt() {
         let input = vec![
-            Instruction::new_e(Opcode::Hlt),
+            Instruction::new_e(Opcode::Halt),
             Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
         ];
         let vm = run(input).unwrap();

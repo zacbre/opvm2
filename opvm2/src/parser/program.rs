@@ -27,7 +27,7 @@ impl From<Vec<(String, u64)>> for Labels {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, FromBytes)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct Program {
     pub instructions: Vec<Instruction>,

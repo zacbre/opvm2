@@ -2,7 +2,76 @@ pub mod plugin;
 pub mod store;
 pub mod vm;
 
-use opvm2::*;
+use extism::{convert::Json, FromBytes, ToBytes, UserData};
+use opvm2::{opcode::Opcode, parser::program::Program, *};
+use plugin::PluginLoader;
+use serde::{Deserialize, Serialize};
+use store::Store;
+
+#[derive(Debug, Deserialize, Serialize, ToBytes, FromBytes, PartialEq, Clone)]
+#[encoding(Json)]
+pub struct CompiledProgram {
+    pub program: Program,
+    pub plugins: Vec<Vec<u8>>,
+}
+
+impl CompiledProgram {
+    pub fn new(program: Program, plugins: Vec<Vec<u8>>) -> Self {
+        Self { program, plugins }
+    }
+
+    pub fn compile(&self) -> Result<Vec<u8>, String> {
+        // todo: find out if we have all the plugins we need before we compile.
+        // load each plugin in the plugin loader
+        let mut loader = PluginLoader::new(UserData::new(Store::new()));
+        loader.load_all(self.plugins.clone())?;
+        let mut err_msg = String::new();
+        for ins in self.program.instructions.iter() {
+            match ins.opcode {
+                Opcode::Plugin(ref name) => {
+                    // if there are no plugins, we can't handle the opcode
+                    if loader.plugins.is_empty() {
+                        err_msg = format!(
+                            "{}No plugins found for handling opcode: `{}`. ",
+                            err_msg,
+                            name.to_string().to_lowercase()
+                        );
+                    }
+                    let mut found = false;
+                    for plugin in loader.plugins.iter_mut() {
+                        if plugin
+                            .function_exists(format!("handle_{}", name.to_string().to_lowercase()))
+                        {
+                            found = true;
+                            continue;
+                        }
+                    }
+                    if !found {
+                        err_msg = format!(
+                            "{}No plugin found for handling opcode: `{}`. ",
+                            err_msg,
+                            name.to_string().to_lowercase()
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !err_msg.is_empty() {
+            return Err(err_msg);
+        }
+        let bytes = (*self).to_bytes().map_err(|e| e.to_string())?;
+        Ok(bytes)
+    }
+
+    pub fn from_compiled(input: Vec<u8>) -> Self {
+        let program = CompiledProgram::from_bytes(&input);
+        match program {
+            Ok(program) => program,
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -126,7 +195,7 @@ mod test {
         let mut vm = super::vm::Vm::new_e();
         let program = Program::from(
             r"
-            jmp start
+            jmp _start
             mov ra, 2   ; this should be skipped
             mov rb, 3   ; this should be skipped
             _start: mov rc, 5
@@ -261,12 +330,12 @@ mod test {
             r"
             call add
             jmp exit
-            _add: mov ra, 3
+            add: mov ra, 3
             mov rb, 4
             add ra, rb
             ret
             mov rc, 5
-            _exit:
+            exit:
             mov rd, 6
         ",
         );

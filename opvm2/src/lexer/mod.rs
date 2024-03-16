@@ -6,7 +6,7 @@ use nom::{
     bytes::complete::{tag, take_while, take_while1},
     combinator::opt,
     sequence::{delimited, preceded, terminated},
-    AsChar, IResult,
+    IResult,
 };
 
 pub(crate) fn lex_input(i: &str) -> Result<Vec<Vec<Token>>, String> {
@@ -75,11 +75,7 @@ fn lex_line(i: &str) -> IResult<&str, Vec<Token>> {
 }
 
 fn label(i: &str) -> IResult<&str, &str> {
-    delimited(
-        preceded(opt(whitespace), tag("_")),
-        take_while(|c| c == '_' || AsChar::is_alphanum(c)),
-        tag(":"),
-    )(i)
+    terminated(preceded(opt(whitespace), take_until_whitespace), tag(":"))(i)
 }
 
 fn comment(i: &str) -> IResult<&str, &str> {
@@ -108,7 +104,7 @@ fn literal_double_quote(i: &str) -> IResult<&str, &str> {
 }
 
 fn take_until_whitespace(i: &str) -> IResult<&str, &str> {
-    take_while1(|c| (c as char).is_alphanumeric())(i)
+    take_while1(|c| (c as char).is_alphanumeric() || c == '_')(i)
 }
 
 fn expression(i: &str) -> IResult<&str, Token> {
@@ -225,6 +221,10 @@ mod test {
         assert_eq!(super::whitespace(" "), Ok(("", " ")));
         assert_eq!(super::whitespace("  "), Ok(("", "  ")));
         assert_eq!(super::whitespace("   "), Ok(("", "   ")));
+        assert_eq!(
+            super::whitespace("                      "),
+            Ok(("", "                      "))
+        );
     }
 
     #[test]
@@ -243,10 +243,12 @@ mod test {
                 code: nom::error::ErrorKind::Tag
             }))
         );
-        assert_eq!(super::label("_label:"), Ok(("", "label")));
-        assert_eq!(super::label("_label: "), Ok((" ", "label")));
-        assert_eq!(super::label("_label: "), Ok((" ", "label")));
-        assert_eq!(super::label("_label_1: "), Ok((" ", "label_1")));
+        assert_eq!(super::label("_label:"), Ok(("", "_label")));
+        assert_eq!(super::label("_label: "), Ok((" ", "_label")));
+        assert_eq!(super::label("_label: "), Ok((" ", "_label")));
+        assert_eq!(super::label("_label_1: "), Ok((" ", "_label_1")));
+        assert_eq!(super::label("label_1: "), Ok((" ", "label_1")));
+        assert_eq!(super::label("label: "), Ok((" ", "label")));
     }
 
     #[test]
@@ -308,6 +310,31 @@ mod test {
                 })
             ))
         );
+
+        assert_eq!(
+            super::expression("   ret  "),
+            Ok((
+                "",
+                super::Token::Expression(super::Expression {
+                    opcode: "ret".to_string(),
+                    lhs: None,
+                    rhs: None
+                })
+            ))
+        );
+
+        /* Can parse opcode with _ */
+        assert_eq!(
+            super::expression("mov_op rax, rdx"),
+            Ok((
+                "",
+                super::Token::Expression(super::Expression {
+                    opcode: "mov_op".to_string(),
+                    lhs: Some("rax".to_string()),
+                    rhs: Some("rdx".to_string())
+                })
+            ))
+        );
     }
 
     #[test]
@@ -317,7 +344,7 @@ mod test {
             Ok((
                 "",
                 vec![
-                    super::Token::Label("label".to_string()),
+                    super::Token::Label("_label".to_string()),
                     super::Token::Expression(super::Expression {
                         opcode: "mov".to_string(),
                         lhs: Some("r0".to_string()),
@@ -335,17 +362,18 @@ mod test {
             super::lex_input(
                 r"
             section .data
-                _label: mov rax, 0
+                _label: eeeee rax, 0
                         mov rcx, 'a'
+                        jmp _label
                         print rcx
         "
             ),
             Ok(vec![
                 vec![Token::Directive("data".to_string())],
                 vec![
-                    Token::Label("label".to_string()),
+                    Token::Label("_label".to_string()),
                     Token::Expression(Expression {
-                        opcode: "mov".to_string(),
+                        opcode: "eeeee".to_string(),
                         lhs: Some("rax".to_string()),
                         rhs: Some("0".to_string())
                     })
@@ -354,6 +382,11 @@ mod test {
                     opcode: "mov".to_string(),
                     lhs: Some("rcx".to_string()),
                     rhs: Some("a".to_string())
+                })],
+                vec![Token::Expression(Expression {
+                    opcode: "jmp".to_string(),
+                    lhs: Some("_label".to_string()),
+                    rhs: None
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "print".to_string(),

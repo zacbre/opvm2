@@ -1,9 +1,6 @@
-use std::ffi::{CStr, CString};
+use std::{ffi::CString, io::Write};
 
-use extism::{
-    sdk::{extism_log_custom, extism_log_drain, Size},
-    *,
-};
+use extism::*;
 use opvm2::plugin_interface::OnInstructionValue;
 
 use crate::{register::Register, store::Store};
@@ -14,12 +11,12 @@ pub struct PluginLoader {
     store: UserData<Store>,
 }
 
-extern "C" fn log(data: *const std::ffi::c_char, size: Size) {
-    unsafe {
-        let line = CStr::from_ptr(data);
-        println!("ttt: {}", line.to_str().unwrap());
-    }
-}
+// extern "C" fn log(data: *const std::ffi::c_char, _size: Size) {
+//     unsafe {
+//         let line = CStr::from_ptr(data);
+//         println!("ttt: {}", line.to_str().unwrap());
+//     }
+// }
 
 impl PluginLoader {
     pub fn new(store: UserData<Store>) -> Self {
@@ -70,8 +67,21 @@ impl PluginLoader {
         Ok(executed_count)
     }
 
-    pub fn load(&mut self, path: &str) {
+    pub fn load_all(&mut self, plugins: Vec<Vec<u8>>) -> Result<(), String> {
+        for plugin in plugins {
+            let manifest = Manifest::new([Wasm::data(plugin)]);
+            self.load(manifest);
+        }
+        Ok(())
+    }
+
+    pub fn load_from_path(&mut self, path: &str) -> Result<(), String> {
         let manifest = Manifest::new([Wasm::file(path)]);
+        self.load(manifest);
+        Ok(())
+    }
+
+    pub fn load(&mut self, manifest: Manifest) {
         let mut plugin = PluginBuilder::new(manifest)
             .with_wasi(true)
             .with_function(
@@ -101,6 +111,7 @@ impl PluginLoader {
             .with_function("jmp_to_label", [PTR], [], self.store.clone(), jmp_to_label)
             .with_function("get_labels", [], [PTR], self.store.clone(), get_labels)
             .with_function("quit", [], [], self.store.clone(), quit)
+            .with_function("print", [PTR], [], self.store.clone(), print)
             .build()
             .unwrap();
         if !plugin.function_exists("name") {
@@ -168,6 +179,12 @@ host_fn!(pub quit(user_data: Store;) -> Result<(), String> {
     std::process::exit(0)
 });
 
+host_fn!(pub print(user_data: Store; data: String) -> Result<(), String> {
+   print!("{}", data);
+   std::io::stdout().flush()?;
+   Ok(())
+});
+
 #[cfg(test)]
 mod test {
     use extism::convert::Json;
@@ -189,8 +206,8 @@ mod test {
         let store = super::Store::new();
         let mut vm = crate::vm::Vm::new(store);
         vm.plugin
-            .load("../target/wasm32-unknown-unknown/debug/plugin_test.wasm");
-
+            .load_from_path("../target/wasm32-unknown-unknown/debug/plugin_test.wasm")
+            .unwrap();
         vm
     }
 
@@ -204,7 +221,7 @@ mod test {
     }
 
     #[test]
-    fn can_give_plugins_access_to_vm() {
+    fn can_give_plugins_access_to_vm() -> Result<(), String> {
         let mut vm = load_vm();
         let program = Program::from(
             r"
@@ -213,11 +230,12 @@ mod test {
         );
         vm.run(program).unwrap();
         vm.plugin
-            .load("../target/wasm32-unknown-unknown/debug/plugin_test.wasm");
+            .load_from_path("../target/wasm32-unknown-unknown/debug/plugin_test.wasm")?;
         let result = vm.plugin.plugins[0].call::<Register, u64>("get_register_test", Register::Ra);
         assert_eq!(result.unwrap(), 5);
         let result = vm.plugin.plugins[0].call::<Register, u64>("get_register_test", Register::Rb);
         assert_eq!(result.unwrap(), 0);
+        Ok(())
     }
 
     #[test]
@@ -269,7 +287,7 @@ mod test {
         let mut vm = load_vm();
         vm.run(Program::from(
             r"
-            jmp label
+            jmp _label
             mov ra, 10
             _label: mov rb, 3
             mov rc, 5",
@@ -279,11 +297,11 @@ mod test {
             let store = vm.store.get()?;
             let store = store.lock().unwrap();
             assert_eq!(store.current_program.labels.list.len(), 1);
-            assert_eq!(store.current_program.labels.list.get("label"), Some(&2));
+            assert_eq!(store.current_program.labels.list.get("_label"), Some(&2));
         }
         let labels = vm.plugin.plugins[0].call::<(), Labels>("get_all_labels_test", ())?;
-        assert_eq!(labels.list.get("label"), Some(&2));
-        vm.plugin.plugins[0].call::<&str, ()>("jmp_to_label_test", "label")?;
+        assert_eq!(labels.list.get("_label"), Some(&2));
+        vm.plugin.plugins[0].call::<&str, ()>("jmp_to_label_test", "_label")?;
         let registers = read_registers(&vm);
         assert_eq!(registers.ra, 0);
         assert_eq!(registers.rb, 3);

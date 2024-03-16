@@ -63,21 +63,24 @@ pub fn handle_life(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>>
 }
 
 #[plugin_fn]
-pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
-    // this one will just debug instructions?
-    Ok(None)
-}
-
-#[plugin_fn]
-pub fn handle_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
+pub fn handle_print_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
     // convert u64 to ascii
-    let value = unsafe {
-        get_register(
-            ins.lhs
-                .get_register()
-                .map_err(|e| extism_pdk::Error::msg(e.to_string()))?,
-        )?
+    // check if it's a number or a register
+    if let Ok(value) = ins.lhs.get_number() {
+        unsafe {
+            print((value as u8 as char).into())?;
+        }
+    } else {
+        let value = unsafe {
+            get_register(
+                ins.lhs
+                    .get_register()
+                    .map_err(|e| extism_pdk::Error::msg(e.to_string()))?,
+            )?
+        };
+        unsafe {
+            print((value as u8 as char).into())?;
+        }
     };
-    info!("{}", value as u8 as char);
     Ok(None)
 }

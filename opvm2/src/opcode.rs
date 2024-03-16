@@ -36,7 +36,7 @@ pub enum Opcode {
     Print,
     Sleep,
     Nop,
-    Hlt,
+    Halt,
     Plugin(String),
 }
 
@@ -69,7 +69,7 @@ impl From<String> for Opcode {
             "print" => Self::Print,
             "sleep" => Self::Sleep,
             "nop" => Self::Nop,
-            "hlt" => Self::Hlt,
+            "hlt" => Self::Halt,
             _ => Self::Plugin(value),
             // todo: add ability to extend with extism? check if the instruction exists.
         }
@@ -105,7 +105,7 @@ impl Display for Opcode {
             Self::Print => write!(f, "print"),
             Self::Sleep => write!(f, "sleep"),
             Self::Nop => write!(f, "nop"),
-            Self::Hlt => write!(f, "hlt"),
+            Self::Halt => write!(f, "hlt"),
             Self::Plugin(s) => write!(f, "{}", s),
         }
     }

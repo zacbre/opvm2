@@ -9,3 +9,4 @@ edition = "2021"
 clap = { version = "4.5.3", features = ["derive"] }
 opvm2 = { path = "../opvm2" }
 opvm2_vm = { path = "../opvm2_vm" }
+lz4 = "1.23.1"
