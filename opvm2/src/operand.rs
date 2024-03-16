@@ -1,11 +1,11 @@
-use extism_pdk::{FromBytes, Json};
-use serde::Deserialize;
+use extism_pdk::{FromBytes, Json, ToBytes};
+use serde::{Deserialize, Serialize};
 
 use crate::register::Register;
 
 // operands have different types. for now we only have registers.
 // we will add more types in the future.
-#[derive(Debug, Deserialize, Clone, PartialEq, FromBytes)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub enum Operand {
     None,        // no operand

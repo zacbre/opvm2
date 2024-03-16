@@ -1,12 +1,10 @@
 use std::sync::MutexGuard;
 
-use extism::{convert::Json, FromBytes, UserData};
-use opvm2::register::Register;
-use serde::Deserialize;
+use extism::UserData;
+use opvm2::plugin_interface::OnInstructionValue;
 
 use crate::{
-    opcode::Opcode, operand::Operand, parser::program::Program, plugin::PluginLoader,
-    register::Registers, stack::Stack, store::Store,
+    opcode::Opcode, operand::Operand, parser::program::Program, plugin::PluginLoader, store::Store,
 };
 
 #[derive(Debug)]
@@ -36,52 +34,6 @@ impl Vm {
         }
     }
 
-    // pub fn load_plugins(&self) -> PluginLoader {
-    //     //let mut plugin_loader = PluginLoader::new();
-    //     //plugin_loader.load("../target/wasm32-unknown-unknown/debug/debugger.wasm");
-    //     //plugin_loader
-    // }
-    //
-
-    // pub fn read_registers(&self) -> Registers {
-    //     let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-    //     let store = store.lock().unwrap();
-    //     store.registers.clone()
-    // }
-
-    // pub fn pop_stack(&mut self) -> Result<u64, String> {
-    //     let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-    //     let mut store = store.lock().unwrap();
-    //     store.stack.pop().ok_or("Stack is empty".to_string())
-    // }
-
-    // pub fn push_stack(&mut self, value: u64) {
-    //     let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-    //     let mut store = store.lock().unwrap();
-    //     store.stack.push(value);
-    // }
-
-    // pub fn peek_stack(&mut self) -> Result<u64, String> {
-    //     let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-    //     let store = store.lock().unwrap();
-    //     let value = store.stack.peek().unwrap();
-    //     Ok(*value)
-    // }
-
-    // pub fn set_register(&mut self, register: &Register, value: u64) -> Result<(), String> {
-    //     let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-    //     let mut store = store.lock().unwrap();
-    //     store.registers.set(register, value);
-    //     Ok(())
-    // }
-
-    // pub fn get_current_program(&self) -> Result<Program, String> {
-    //     let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-    //     let store = store.lock().unwrap();
-    //     Ok(store.current_program.clone())
-    // }
-    //
-
     pub fn check_pc(&self) -> u64 {
         let store = self.store.get().map_err(|e| e.to_string()).unwrap();
         let store = store.lock().unwrap();
@@ -96,28 +48,40 @@ impl Vm {
             store.current_program = program.clone();
         }
         //let plugin_loader = self.load_plugins();
-        while (self.check_pc() as usize) < program.instructions.len() {
+        'outer: while (self.check_pc() as usize) < program.instructions.len() {
             let item = &program.instructions[self.check_pc() as usize];
-            // for plugin in &plugin_loader.plugins {
-            //     if plugin.function_exists(&item.opcode.to_string()) {
-            //         let lhs = self.get_value(&item.lhs);
-            //         let rhs = self.get_value(&item.rhs);
-            //         let result =
-            //             plugin.call::<(u64, u64), u64>(&item.opcode.to_string(), (lhs, rhs));
-            //         self.registers
-            //             .set(&item.lhs.get_register()?, result.unwrap());
-            //         self.read_registers().increment_pc();
-            //         continue;
-            //     }
-            // }
+            for plugin in self.plugin.plugins.iter_mut() {
+                let plugin_fn = format!("handle_{}", &item.opcode.to_string().to_lowercase());
+                if plugin.function_exists(&plugin_fn) {
+                    plugin
+                        .call::<OnInstructionValue, ()>(
+                            &plugin_fn,
+                            OnInstructionValue {
+                                lhs: item.lhs.clone(),
+                                rhs: item.rhs.clone(),
+                            },
+                        )
+                        .map_err(|e| e.to_string())?;
+                    {
+                        let store = self.store.get().map_err(|e| e.to_string()).unwrap();
+                        let mut store = store.lock().unwrap();
+                        store.registers.increment_pc();
+                    }
+                    continue 'outer;
+                }
+            }
+
             let store = self.store.get().map_err(|e| e.to_string()).unwrap();
             let mut store = store.lock().unwrap();
+            let (lhs, rhs) = (
+                self.get_value(&mut store, &item.lhs)?,
+                self.get_value(&mut store, &item.rhs)?,
+            );
 
             match item.opcode.clone() {
                 Opcode::Mov => {
                     let lhs = item.lhs.get_register()?;
-                    let rhs_value = self.get_value(&mut store, &item.rhs)?;
-                    store.registers.set(&lhs, rhs_value);
+                    store.registers.set(&lhs, rhs.expect("rhs is None"));
                 }
                 Opcode::Add => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
                 Opcode::Sub => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
@@ -126,22 +90,20 @@ impl Vm {
                 Opcode::Mod => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
                 Opcode::Xor => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
                 Opcode::Inc => {
-                    let lhs = self.get_value(&mut store, &item.lhs)?;
-
-                    store.registers.set(&item.lhs.get_register()?, lhs + 1);
+                    store
+                        .registers
+                        .set(&item.lhs.get_register()?, lhs.expect("lhs is none") + 1);
                 }
                 Opcode::Dec => {
-                    let lhs = self.get_value(&mut store, &item.lhs)?;
-
-                    store.registers.set(&item.lhs.get_register()?, lhs - 1);
+                    store
+                        .registers
+                        .set(&item.lhs.get_register()?, lhs.expect("lhs is none") - 1);
                 }
                 Opcode::Print => {
-                    let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                    println!("{}", lhs_value);
+                    println!("{}", lhs.expect("lhs is none"));
                 }
                 Opcode::Push => {
-                    let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                    store.stack.push(lhs_value);
+                    store.stack.push(lhs.expect("lhs is none"));
                 }
                 Opcode::Pop => {
                     let lhs = item.lhs.get_register()?;
@@ -154,29 +116,25 @@ impl Vm {
                 }
                 Opcode::Test => self.test(&mut store, &item.lhs, &item.rhs),
                 Opcode::Jmp => {
-                    let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                    store.registers.set_pc(lhs_value);
+                    store.registers.set_pc(lhs.expect("lhs is none"));
                     continue;
                 }
                 Opcode::Je => {
                     if store.registers.check_equals_flag() {
-                        let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                        store.registers.set_pc(lhs_value);
+                        store.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jne => {
                     if !store.registers.check_equals_flag() {
-                        let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                        store.registers.set_pc(lhs_value);
+                        store.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jle => {
                     if store.registers.check_equals_flag() || store.registers.check_less_than_flag()
                     {
-                        let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                        store.registers.set_pc(lhs_value);
+                        store.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
@@ -184,30 +142,26 @@ impl Vm {
                     if store.registers.check_equals_flag()
                         || store.registers.check_greater_than_flag()
                     {
-                        let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                        store.registers.set_pc(lhs_value);
+                        store.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jl => {
                     if store.registers.check_less_than_flag() {
-                        let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                        store.registers.set_pc(lhs_value);
+                        store.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jg => {
                     if store.registers.check_greater_than_flag() {
-                        let lhs_value = self.get_value(&mut store, &item.lhs)?;
-                        store.registers.set_pc(lhs_value);
+                        store.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Call => {
-                    let lhs_value = self.get_value(&mut store, &item.lhs)?;
                     let call_stack_pointer = store.registers.check_pc() + 1;
                     store.call_stack.push(call_stack_pointer);
-                    store.registers.set_pc(lhs_value);
+                    store.registers.set_pc(lhs.expect("lhs is none"));
                     continue;
                 }
                 Opcode::Return => {
@@ -254,22 +208,26 @@ impl Vm {
         }
     }
 
-    fn get_value(&self, store: &mut MutexGuard<Store>, operand: &Operand) -> Result<u64, String> {
+    fn get_value(
+        &self,
+        store: &mut MutexGuard<Store>,
+        operand: &Operand,
+    ) -> Result<Option<u64>, String> {
         match operand {
-            Operand::N(n) => Ok(*n),
-            Operand::R(r) => Ok(store.registers.get(&r)),
-            Operand::L(l) => Ok(store
-                .current_program
-                .labels
-                .get(l)
-                .unwrap()
-                .clone()
-                .try_into()
-                .unwrap()),
-            _ => panic!(
-                "{}",
-                format!("Invalid operand for operation: {:?}", operand)
-            ),
+            Operand::N(n) => Ok(Some(*n)),
+            Operand::R(r) => Ok(Some(store.registers.get(&r))),
+            Operand::L(l) => Ok(Some(
+                store
+                    .current_program
+                    .labels
+                    .list
+                    .get(l)
+                    .unwrap()
+                    .clone()
+                    .try_into()
+                    .unwrap(),
+            )),
+            _ => Ok(None),
         }
     }
 
@@ -280,8 +238,8 @@ impl Vm {
         rhs: &Operand,
         operator: Opcode,
     ) -> Result<(), String> {
-        let lhs_value = self.get_value(store, lhs)?;
-        let rhs_value = self.get_value(store, rhs)?;
+        let lhs_value = self.get_value(store, lhs)?.expect("lhs is none");
+        let rhs_value = self.get_value(store, rhs)?.expect("rhs is none");
         let value = match operator {
             Opcode::Add => lhs_value + rhs_value,
             Opcode::Sub => lhs_value - rhs_value,
@@ -300,28 +258,26 @@ impl Vm {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use crate::instruction::Instruction;
     use crate::opcode::Opcode;
     use crate::operand::Operand;
-    use crate::parser::program::Program;
+    use crate::parser::program::{Labels, Program};
     use crate::register::Register;
 
     fn run(input: Vec<Instruction>) -> Result<Vm, String> {
         let mut vm = super::Vm::new_e();
         vm.run(Program {
             instructions: input,
-            labels: HashMap::new(),
+            labels: Labels::new(),
         })?;
         Ok(vm)
     }
 
-    fn run_l(input: Vec<Instruction>, labels: HashMap<String, usize>) -> Result<Vm, String> {
+    fn run_l(input: Vec<Instruction>, labels: Vec<(String, u64)>) -> Result<Vm, String> {
         let mut vm = super::Vm::new_e();
         vm.run(Program {
             instructions: input,
-            labels,
+            labels: Labels::from(labels),
         })?;
         Ok(vm)
     }
@@ -518,7 +474,7 @@ mod test {
             Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(30)),
         ];
-        let labels = vec![("start".to_string(), 3)].into_iter().collect();
+        let labels = vec![("start".to_string(), 3)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 0);
         assert_eq!(read_registers(&vm).rb, 0);
@@ -540,9 +496,7 @@ mod test {
             Instruction::new_l(Opcode::Jmp, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("less".to_string(), 6), ("end".to_string(), 7)]
-            .into_iter()
-            .collect();
+        let labels = vec![("less".to_string(), 6), ("end".to_string(), 7)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -563,9 +517,7 @@ mod test {
             ),
             Instruction::new_e(Opcode::Return),
         ];
-        let labels = vec![("start".to_string(), 2), ("end".to_string(), 5)]
-            .into_iter()
-            .collect();
+        let labels = vec![("start".to_string(), 2), ("end".to_string(), 5)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 20);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -584,7 +536,7 @@ mod test {
             Instruction::new_l(Opcode::Je, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -604,7 +556,7 @@ mod test {
             Instruction::new_l(Opcode::Jne, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -624,7 +576,7 @@ mod test {
             Instruction::new_l(Opcode::Jge, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -644,7 +596,7 @@ mod test {
             Instruction::new_l(Opcode::Jle, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -664,7 +616,7 @@ mod test {
             Instruction::new_l(Opcode::Jg, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -684,7 +636,7 @@ mod test {
             Instruction::new_l(Opcode::Jl, Operand::L("end".to_string())),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 20);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -720,7 +672,7 @@ mod test {
             ),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -739,7 +691,7 @@ mod test {
             ),
             Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
         ];
-        let labels = vec![("end".to_string(), 6)].into_iter().collect();
+        let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels);
         assert_eq!(vm.unwrap_err(), "Assertion failed at ins 2.".to_string());
     }

@@ -49,7 +49,7 @@ macro_rules! flag_register {
     };
 }
 
-#[derive(Debug, Deserialize, PartialEq, FromBytes, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct Registers {
     pub ra: u64,

@@ -1,15 +1,37 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use extism_pdk::{FromBytes, Json};
-use serde::Deserialize;
+use extism_pdk::{FromBytes, Json, ToBytes};
+use serde::{Deserialize, Serialize};
 
 use crate::{instruction::Instruction, lexer::token::Token, operand::Operand};
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
+#[encoding(Json)]
+pub struct Labels {
+    pub list: BTreeMap<String, u64>,
+}
+
+impl Labels {
+    pub fn new() -> Self {
+        Self {
+            list: Default::default(),
+        }
+    }
+}
+
+impl From<Vec<(String, u64)>> for Labels {
+    fn from(vec: Vec<(String, u64)>) -> Self {
+        Self {
+            list: vec.into_iter().collect(),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, PartialEq, Clone, FromBytes)]
 #[encoding(Json)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
-    pub labels: HashMap<String, usize>,
+    pub labels: Labels,
 }
 
 impl Program {
@@ -31,14 +53,16 @@ impl Program {
 
     fn tokens_to_program(tokens: Vec<Vec<Token>>) -> Result<Self, String> {
         let mut instructions = Vec::new();
-        let mut labels: HashMap<String, usize> = HashMap::new();
+        let mut labels: Labels = Labels {
+            list: Default::default(),
+        };
         //let mut directives = Vec::new();
         for token_list in tokens {
             for token in token_list {
                 match token {
                     Token::Label(l) => {
                         // mark the location at which the label is located at, use instructions.len()
-                        labels.insert(l, instructions.len());
+                        labels.list.insert(l, instructions.len() as u64);
                     }
                     Token::Directive(_) => todo!(),
                     Token::Expression(e) => {
@@ -66,7 +90,7 @@ impl Program {
     pub fn empty() -> Program {
         Program {
             instructions: vec![],
-            labels: Default::default(),
+            labels: Labels::new(),
         }
     }
 }
@@ -104,7 +128,7 @@ mod test {
                         Operand::R(Register::Rb)
                     ),
                 ],
-                labels: Default::default(),
+                labels: Labels::new(),
             }
         )
     }
@@ -135,9 +159,7 @@ mod test {
                         Operand::R(Register::Rb)
                     ),
                 ],
-                labels: vec![("start".to_string(), 0), ("end".to_string(), 2)]
-                    .into_iter()
-                    .collect(),
+                labels: Labels::from(vec![("start".to_string(), 0), ("end".to_string(), 2)])
             }
         )
     }

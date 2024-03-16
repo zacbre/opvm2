@@ -1,9 +1,9 @@
-use extism_pdk::{FromBytes, Json};
-use serde::Deserialize;
+use extism_pdk::{FromBytes, Json, ToBytes};
+use serde::{Deserialize, Serialize};
 
 use crate::{opcode::Opcode, operand::Operand};
 
-#[derive(Debug, Deserialize, PartialEq, Clone, FromBytes)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct Instruction {
     pub opcode: Opcode,
