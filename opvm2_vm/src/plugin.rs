@@ -1,4 +1,10 @@
-use extism::*;
+use std::ffi::{CStr, CString};
+
+use extism::{
+    sdk::{extism_log_custom, extism_log_drain, Size},
+    *,
+};
+use opvm2::plugin_interface::OnInstructionValue;
 
 use crate::{register::Register, store::Store};
 
@@ -8,17 +14,65 @@ pub struct PluginLoader {
     store: UserData<Store>,
 }
 
+extern "C" fn log(data: *const std::ffi::c_char, size: Size) {
+    unsafe {
+        let line = CStr::from_ptr(data);
+        println!("ttt: {}", line.to_str().unwrap());
+    }
+}
+
 impl PluginLoader {
     pub fn new(store: UserData<Store>) -> Self {
+        unsafe {
+            if !cfg!(test) {
+                let stdout = CString::new("stdout").unwrap();
+                let info = CString::new("info").unwrap();
+                sdk::extism_log_file(stdout.as_ptr(), info.as_ptr());
+            }
+
+            //extism_log_custom(info.as_ptr());
+            //extism_log_drain(log)
+        }
         Self {
             plugins: vec![],
             store,
         }
     }
 
+    pub fn execute_plugin_fn(
+        &mut self,
+        name: String,
+        ins: OnInstructionValue,
+        is_hook: bool,
+    ) -> Result<u64, String> {
+        let mut executed_count = 0;
+        for plugin in self.plugins.iter_mut() {
+            if !plugin.function_exists(&name) {
+                continue;
+            }
+
+            let addr = plugin
+                .call::<&OnInstructionValue, Option<u64>>(&name, &ins)
+                .map_err(|e| e.to_string())?;
+
+            let store = self.store.get().map_err(|e| e.to_string()).unwrap();
+            let mut store = store.lock().unwrap();
+            match addr {
+                Some(addr) => store.registers.set_pc(addr),
+                None => {
+                    if !is_hook {
+                        store.registers.increment_pc()
+                    }
+                }
+            }
+            executed_count += 1;
+        }
+        Ok(executed_count)
+    }
+
     pub fn load(&mut self, path: &str) {
         let manifest = Manifest::new([Wasm::file(path)]);
-        let plugin = PluginBuilder::new(manifest)
+        let mut plugin = PluginBuilder::new(manifest)
             .with_wasi(true)
             .with_function(
                 "all_registers",
@@ -46,9 +100,14 @@ impl PluginLoader {
             .with_function("get_input", [], [PTR], self.store.clone(), get_input)
             .with_function("jmp_to_label", [PTR], [], self.store.clone(), jmp_to_label)
             .with_function("get_labels", [], [PTR], self.store.clone(), get_labels)
+            .with_function("quit", [], [], self.store.clone(), quit)
             .build()
             .unwrap();
-        //let plugin = Plugin::new(&manifest, [], true).unwrap();
+        if !plugin.function_exists("name") {
+            panic!("Plugin does not have a `name` function");
+        }
+        let name = plugin.call::<(), String>("name", ()).unwrap();
+        println!("Loaded plugin: {}", name);
         self.plugins.push(plugin);
     }
 }
@@ -103,6 +162,10 @@ host_fn!(pub get_labels(user_data: Store;) -> Result<Labels, String> {
     let store = user_data.get()?;
     let store = store.lock().unwrap();
     Ok(store.current_program.labels.clone())
+});
+
+host_fn!(pub quit(user_data: Store;) -> Result<(), String> {
+    std::process::exit(0)
 });
 
 #[cfg(test)]

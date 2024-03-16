@@ -48,28 +48,30 @@ impl Vm {
             store.current_program = program.clone();
         }
         //let plugin_loader = self.load_plugins();
+        println!("{:?}", program.instructions);
         'outer: while (self.check_pc() as usize) < program.instructions.len() {
-            let item = &program.instructions[self.check_pc() as usize];
-            for plugin in self.plugin.plugins.iter_mut() {
-                let plugin_fn = format!("handle_{}", &item.opcode.to_string().to_lowercase());
-                if plugin.function_exists(&plugin_fn) {
-                    plugin
-                        .call::<OnInstructionValue, ()>(
-                            &plugin_fn,
-                            OnInstructionValue {
-                                lhs: item.lhs.clone(),
-                                rhs: item.rhs.clone(),
-                            },
-                        )
-                        .map_err(|e| e.to_string())?;
-                    {
-                        let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-                        let mut store = store.lock().unwrap();
-                        store.registers.increment_pc();
+            let pc = self.check_pc();
+            let item = &program.instructions[pc as usize];
+            let ins = OnInstructionValue {
+                opcode: item.opcode.clone(),
+                lhs: item.lhs.clone(),
+                rhs: item.rhs.clone(),
+                pc,
+            };
+            self.plugin
+                .execute_plugin_fn("handle_instruction".to_string(), ins.clone(), true)?;
+            match self.plugin.execute_plugin_fn(
+                format!("handle_{}", &item.opcode.to_string().to_lowercase()),
+                ins.clone(),
+                false,
+            ) {
+                Ok(count) => {
+                    if count > 0 {
+                        continue 'outer;
                     }
-                    continue 'outer;
                 }
-            }
+                Err(_) => (),
+            };
 
             let store = self.store.get().map_err(|e| e.to_string()).unwrap();
             let mut store = store.lock().unwrap();
@@ -100,7 +102,7 @@ impl Vm {
                         .set(&item.lhs.get_register()?, lhs.expect("lhs is none") - 1);
                 }
                 Opcode::Print => {
-                    println!("{}", lhs.expect("lhs is none"));
+                    print!("{}", lhs.expect("lhs is none"));
                 }
                 Opcode::Push => {
                     store.stack.push(lhs.expect("lhs is none"));
@@ -178,6 +180,11 @@ impl Vm {
                         ));
                     }
                     store.registers.reset_flags();
+                }
+                Opcode::Sleep => {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        lhs.expect("lhs is none") as u64
+                    ));
                 }
                 Opcode::Nop => {}
                 Opcode::Hlt => {
@@ -258,6 +265,8 @@ impl Vm {
 
 #[cfg(test)]
 mod test {
+    use std::time::Instant;
+
     use crate::instruction::Instruction;
     use crate::opcode::Opcode;
     use crate::operand::Operand;
@@ -694,5 +703,16 @@ mod test {
         let labels = vec![("end".to_string(), 6)];
         let vm = run_l(input, labels);
         assert_eq!(vm.unwrap_err(), "Assertion failed at ins 2.".to_string());
+    }
+
+    #[test]
+    fn can_sleep() -> Result<(), String> {
+        let start = Instant::now();
+        let input = vec![Instruction::new_l(Opcode::Sleep, Operand::N(100))];
+        let labels = vec![("end".to_string(), 6)];
+        run_l(input, labels)?;
+        let end = start.elapsed();
+        assert!(end.as_millis() > 100);
+        Ok(())
     }
 }

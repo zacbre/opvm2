@@ -53,11 +53,31 @@ pub fn jmp_to_label_test(label: String) -> FnResult<()> {
 }
 
 #[plugin_fn]
-pub fn handle_life(Json(ins): Json<OnInstructionValue>) -> FnResult<()> {
+pub fn handle_life(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
     let register = ins
         .lhs
         .get_register()
         .map_err(|e| extism_pdk::Error::msg(e.to_string()))?;
     unsafe { set_register(register, 42)? }
-    Ok(())
+    Ok(None)
+}
+
+#[plugin_fn]
+pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
+    // this one will just debug instructions?
+    Ok(None)
+}
+
+#[plugin_fn]
+pub fn handle_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
+    // convert u64 to ascii
+    let value = unsafe {
+        get_register(
+            ins.lhs
+                .get_register()
+                .map_err(|e| extism_pdk::Error::msg(e.to_string()))?,
+        )?
+    };
+    info!("{}", value as u8 as char);
+    Ok(None)
 }

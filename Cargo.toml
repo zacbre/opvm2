@@ -1,1 +1,1 @@
-workspace = { members = ["debugger", "opvm2", "opvm2_vm", "plugin_test"], resolver = "2" }
+workspace = { members = ["debugger", "opvm2", "opvm2_cli", "opvm2_vm", "plugin_test"], resolver = "2" }

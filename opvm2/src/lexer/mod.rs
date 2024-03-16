@@ -66,7 +66,6 @@ fn lex_line(i: &str) -> IResult<&str, Vec<Token>> {
         if let Ok((out, tok)) = res {
             tokens.push(tok);
             og = out;
-            println!("output: {:?}", og);
         } else {
             break;
         }

@@ -34,6 +34,7 @@ pub enum Opcode {
     /* Various */
     Assert,
     Print,
+    Sleep,
     Nop,
     Hlt,
     Plugin(String),
@@ -66,6 +67,7 @@ impl From<String> for Opcode {
             "ret" => Self::Return,
             "assert" => Self::Assert,
             "print" => Self::Print,
+            "sleep" => Self::Sleep,
             "nop" => Self::Nop,
             "hlt" => Self::Hlt,
             _ => Self::Plugin(value),
@@ -101,6 +103,7 @@ impl Display for Opcode {
             Self::Return => write!(f, "ret"),
             Self::Assert => write!(f, "assert"),
             Self::Print => write!(f, "print"),
+            Self::Sleep => write!(f, "sleep"),
             Self::Nop => write!(f, "nop"),
             Self::Hlt => write!(f, "hlt"),
             Self::Plugin(s) => write!(f, "{}", s),
