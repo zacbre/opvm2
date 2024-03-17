@@ -1,7 +1,7 @@
 use std::sync::MutexGuard;
 
 use extism::UserData;
-use opvm2::plugin_interface::OnInstructionValue;
+use opvm2::{parser::program::LabelValue, plugin_interface::OnInstructionValue};
 
 use crate::{
     opcode::Opcode, operand::Operand, parser::program::Program, plugin::PluginLoader, store::Store,
@@ -221,19 +221,16 @@ impl Vm {
         operand: &Operand,
     ) -> Result<Option<u64>, String> {
         match operand {
-            Operand::N(n) => Ok(Some(*n)),
-            Operand::R(r) => Ok(Some(store.registers.get(&r))),
-            Operand::L(l) => Ok(Some(
-                store
-                    .current_program
-                    .labels
-                    .list
-                    .get(l)
-                    .unwrap()
-                    .clone()
-                    .try_into()
-                    .unwrap(),
-            )),
+            Operand::Number(n) => Ok(Some(*n)),
+            Operand::Register(r) => Ok(Some(store.registers.get(&r))),
+            Operand::Label(l) => {
+                let value = store.current_program.labels.list.get(l).unwrap().clone();
+                match value {
+                    LabelValue::Address(n) => Ok(Some(n)),
+                    // todo: address of label value? not sure how to implement this just yet.
+                    LabelValue::Literal(_l) => Ok(None),
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -282,7 +279,7 @@ mod test {
         Ok(vm)
     }
 
-    fn run_l(input: Vec<Instruction>, labels: Vec<(String, u64)>) -> Result<Vm, String> {
+    fn run_l(input: Vec<Instruction>, labels: Vec<(String, LabelValue)>) -> Result<Vm, String> {
         let mut vm = super::Vm::new_e();
         vm.run(Program {
             instructions: input,
@@ -304,24 +301,37 @@ mod test {
     }
 
     use super::Vm;
+    use opvm2::parser::program::LabelValue;
     use opvm2::register::Registers;
     use test_case::test_case;
 
     #[test]
     fn can_run_vm() -> Result<(), String> {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(10)),
             Instruction::new(
-                Opcode::Add,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(10),
             ),
             Instruction::new(
                 Opcode::Add,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rc),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
+            ),
+            Instruction::new(
+                Opcode::Add,
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rc),
             ),
         ];
         let vm = run(input)?;
@@ -334,8 +344,8 @@ mod test {
     fn can_mov_value_to_register() -> Result<(), String> {
         let input = vec![Instruction::new(
             Opcode::Mov,
-            Operand::R(Register::Ra),
-            Operand::N(10),
+            Operand::Register(Register::Ra),
+            Operand::Number(10),
         )];
         let vm = run(input)?;
         assert_eq!(read_registers(&vm).ra, 10);
@@ -345,11 +355,15 @@ mod test {
     #[test]
     fn can_mov_value_from_register_to_register() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
             Instruction::new(
                 Opcode::Mov,
-                Operand::R(Register::Rb),
-                Operand::R(Register::Ra),
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Register(Register::Ra),
             ),
         ];
         let vm = run(input).unwrap();
@@ -374,18 +388,18 @@ mod test {
         let input = vec![
             Instruction::new(
                 Opcode::Mov,
-                Operand::R(Register::try_from(lhs.to_string()).unwrap()),
-                Operand::N(lval),
+                Operand::Register(Register::try_from(lhs.to_string()).unwrap()),
+                Operand::Number(lval),
             ),
             Instruction::new(
                 Opcode::Mov,
-                Operand::R(Register::try_from(rhs.to_string()).unwrap()),
-                Operand::N(rval),
+                Operand::Register(Register::try_from(rhs.to_string()).unwrap()),
+                Operand::Number(rval),
             ),
             Instruction::new(
                 opcode,
-                Operand::R(Register::try_from(lhs.to_string()).unwrap()),
-                Operand::R(Register::try_from(rhs.to_string()).unwrap()),
+                Operand::Register(Register::try_from(lhs.to_string()).unwrap()),
+                Operand::Register(Register::try_from(rhs.to_string()).unwrap()),
             ),
         ];
 
@@ -414,13 +428,13 @@ mod test {
         let input = vec![
             Instruction::new(
                 Opcode::Mov,
-                Operand::R(Register::try_from(lhs.to_string()).unwrap()),
-                Operand::N(lval),
+                Operand::Register(Register::try_from(lhs.to_string()).unwrap()),
+                Operand::Number(lval),
             ),
             Instruction::new(
                 opcode,
-                Operand::R(Register::try_from(lhs.to_string()).unwrap()),
-                Operand::N(rval),
+                Operand::Register(Register::try_from(lhs.to_string()).unwrap()),
+                Operand::Number(rval),
             ),
         ];
 
@@ -436,8 +450,8 @@ mod test {
     #[test]
     fn can_push_and_pop() -> Result<(), String> {
         let input = vec![
-            Instruction::new_l(Opcode::Push, Operand::N(10)),
-            Instruction::new_l(Opcode::Pop, Operand::R(Register::Ra)),
+            Instruction::new_l(Opcode::Push, Operand::Number(10)),
+            Instruction::new_l(Opcode::Pop, Operand::Register(Register::Ra)),
         ];
         let vm = run(input)?;
         assert_eq!(read_registers(&vm).ra, 10);
@@ -447,11 +461,11 @@ mod test {
     #[test]
     fn can_push_and_pop_multiple() {
         let input = vec![
-            Instruction::new_l(Opcode::Push, Operand::N(10)),
-            Instruction::new_l(Opcode::Push, Operand::N(20)),
-            Instruction::new_l(Opcode::Push, Operand::N(30)),
-            Instruction::new_l(Opcode::Pop, Operand::R(Register::Ra)),
-            Instruction::new_l(Opcode::Pop, Operand::R(Register::Rb)),
+            Instruction::new_l(Opcode::Push, Operand::Number(10)),
+            Instruction::new_l(Opcode::Push, Operand::Number(20)),
+            Instruction::new_l(Opcode::Push, Operand::Number(30)),
+            Instruction::new_l(Opcode::Pop, Operand::Register(Register::Ra)),
+            Instruction::new_l(Opcode::Pop, Operand::Register(Register::Rb)),
         ];
         let mut vm = run(input).unwrap();
         assert_eq!(read_registers(&vm).ra, 30);
@@ -462,11 +476,27 @@ mod test {
     #[test]
     fn can_jump() -> Result<(), String> {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::R0), Operand::N(4)),
-            Instruction::new_l(Opcode::Jmp, Operand::R(Register::R0)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(30)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::R0),
+                Operand::Number(4),
+            ),
+            Instruction::new_l(Opcode::Jmp, Operand::Register(Register::R0)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(30),
+            ),
         ];
         let vm = run(input)?;
         assert_eq!(read_registers(&vm).ra, 0);
@@ -478,12 +508,24 @@ mod test {
     #[test]
     fn can_jump_to_label() {
         let input = vec![
-            Instruction::new_l(Opcode::Jmp, Operand::L("start".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(30)),
+            Instruction::new_l(Opcode::Jmp, Operand::Label("start".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(30),
+            ),
         ];
-        let labels = vec![("start".to_string(), 3)];
+        let labels = vec![("start".to_string(), LabelValue::Address(3))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 0);
         assert_eq!(read_registers(&vm).rb, 0);
@@ -493,19 +535,38 @@ mod test {
     #[test]
     fn can_test() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jle, Operand::L("less".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rd), Operand::N(1)),
-            Instruction::new_l(Opcode::Jmp, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Jle, Operand::Label("less".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rd),
+                Operand::Number(1),
+            ),
+            Instruction::new_l(Opcode::Jmp, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("less".to_string(), 6), ("end".to_string(), 7)];
+        let labels = vec![
+            ("less".to_string(), LabelValue::Address(6)),
+            ("end".to_string(), LabelValue::Address(7)),
+        ];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -516,17 +577,24 @@ mod test {
     #[test]
     fn can_call_and_return() {
         let input = vec![
-            Instruction::new_l(Opcode::Call, Operand::L("start".to_string())),
-            Instruction::new_l(Opcode::Jmp, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(20)),
+            Instruction::new_l(Opcode::Call, Operand::Label("start".to_string())),
+            Instruction::new_l(Opcode::Jmp, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(20),
+            ),
             Instruction::new(
                 Opcode::Add,
-                Operand::R(Register::Rb),
-                Operand::R(Register::Ra),
+                Operand::Register(Register::Rb),
+                Operand::Register(Register::Ra),
             ),
             Instruction::new_e(Opcode::Return),
         ];
-        let labels = vec![("start".to_string(), 2), ("end".to_string(), 5)];
+        let labels = vec![
+            ("start".to_string(), LabelValue::Address(2)),
+            ("end".to_string(), LabelValue::Address(5)),
+        ];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 20);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -535,17 +603,29 @@ mod test {
     #[test]
     fn can_jump_if_equal() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(10)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(10),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Je, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Je, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -555,17 +635,29 @@ mod test {
     #[test]
     fn can_jump_if_not_equal() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jne, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Jne, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -575,17 +667,29 @@ mod test {
     #[test]
     fn can_jump_if_greater_than_or_equal() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(10)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(10),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jge, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Jge, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -595,17 +699,29 @@ mod test {
     #[test]
     fn can_jump_if_less_than_or_equal() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jle, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Jle, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -615,17 +731,29 @@ mod test {
     #[test]
     fn can_jump_if_greater_than() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jg, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Jg, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 20);
@@ -635,17 +763,29 @@ mod test {
     #[test]
     fn can_jump_if_less_than() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(20)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(10)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(20),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(10),
+            ),
             Instruction::new(
                 Opcode::Test,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jl, Operand::L("end".to_string())),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new_l(Opcode::Jl, Operand::Label("end".to_string())),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 20);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -663,7 +803,11 @@ mod test {
     fn can_halt() {
         let input = vec![
             Instruction::new_e(Opcode::Halt),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
         ];
         let vm = run(input).unwrap();
         assert_eq!(read_registers(&vm).ra, 0);
@@ -672,16 +816,28 @@ mod test {
     #[test]
     fn can_assert() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(10)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(10),
+            ),
             Instruction::new(
                 Opcode::Assert,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels).unwrap();
         assert_eq!(read_registers(&vm).ra, 10);
         assert_eq!(read_registers(&vm).rb, 10);
@@ -691,16 +847,28 @@ mod test {
     #[test]
     fn can_assert_failure() {
         let input = vec![
-            Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(10)),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rb), Operand::N(20)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rb),
+                Operand::Number(20),
+            ),
             Instruction::new(
                 Opcode::Assert,
-                Operand::R(Register::Ra),
-                Operand::R(Register::Rb),
+                Operand::Register(Register::Ra),
+                Operand::Register(Register::Rb),
             ),
-            Instruction::new(Opcode::Mov, Operand::R(Register::Rc), Operand::N(1)),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(1),
+            ),
         ];
-        let labels = vec![("end".to_string(), 6)];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         let vm = run_l(input, labels);
         assert_eq!(vm.unwrap_err(), "Assertion failed at ins 2.".to_string());
     }
@@ -708,8 +876,8 @@ mod test {
     #[test]
     fn can_sleep() -> Result<(), String> {
         let start = Instant::now();
-        let input = vec![Instruction::new_l(Opcode::Sleep, Operand::N(100))];
-        let labels = vec![("end".to_string(), 6)];
+        let input = vec![Instruction::new_l(Opcode::Sleep, Operand::Number(100))];
+        let labels = vec![("end".to_string(), LabelValue::Address(6))];
         run_l(input, labels)?;
         let end = start.elapsed();
         assert!(end.as_millis() > 100);

@@ -8,10 +8,10 @@ use crate::register::Register;
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub enum Operand {
-    None,        // no operand
-    R(Register), // register
-    N(u64),      // number
-    L(String),   // label
+    None, // no operand
+    Register(Register),
+    Number(u64),
+    Label(String),
 }
 
 impl TryFrom<String> for Operand {
@@ -20,20 +20,20 @@ impl TryFrom<String> for Operand {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         // start trying from.
         if let Ok(val) = value.parse::<u64>() {
-            return Ok(Operand::N(val));
+            return Ok(Operand::Number(val));
         }
 
         if let Ok(val) = value.clone().try_into() {
-            return Ok(Operand::R(val));
+            return Ok(Operand::Register(val));
         }
 
         if let Ok(val) = value.clone().try_into() {
-            return Ok(Operand::L(val));
+            return Ok(Operand::Label(val));
         }
 
         if value.starts_with("0x") {
             if let Ok(val) = u64::from_str_radix(value.trim_start_matches("0x"), 16) {
-                return Ok(Operand::N(val));
+                return Ok(Operand::Number(val));
             }
         }
 
@@ -44,14 +44,14 @@ impl TryFrom<String> for Operand {
 impl Operand {
     pub fn get_register(&self) -> Result<Register, String> {
         match self {
-            Operand::R(register) => Ok(*register),
+            Operand::Register(register) => Ok(*register),
             _ => Err(format!("Register not valid: {:?}", self)),
         }
     }
 
     pub fn get_number(&self) -> Result<u64, String> {
         match self {
-            Operand::N(number) => Ok(*number),
+            Operand::Number(number) => Ok(*number),
             _ => Err(format!("Number not valid: {:?}", self)),
         }
     }

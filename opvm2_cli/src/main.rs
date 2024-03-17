@@ -58,8 +58,24 @@ fn run_compiled_program(vm: &mut Vm, path: String) -> Result<(), String> {
     Ok(())
 }
 
+fn compile(path: String, plugins: Vec<Vec<u8>>) -> Result<(), String> {
+    let file_content = std::fs::read_to_string(&path).unwrap();
+    let program = Program::from(file_content.as_str());
+    let to_compile = CompiledProgram::new(program, plugins);
+
+    let compiled = to_compile.compile()?;
+
+    compress(
+        compiled,
+        format!(
+            "{}c",
+            Path::new(&path).file_name().unwrap().to_str().unwrap()
+        ),
+    )?;
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
-    // compiler frontend?
     let mut vm = Vm::new_e();
     let args = Args::parse();
 
@@ -78,20 +94,7 @@ fn main() -> Result<(), String> {
 
     if args.compile {
         let now = Instant::now();
-
-        let file_content = std::fs::read_to_string(&args.file).unwrap();
-        let program = Program::from(file_content.as_str());
-        let to_compile = CompiledProgram::new(program, plugins);
-
-        let compiled = to_compile.compile()?;
-
-        compress(
-            compiled,
-            format!(
-                "{}.compiled",
-                Path::new(&args.file).file_name().unwrap().to_str().unwrap()
-            ),
-        )?;
+        compile(args.file, plugins)?;
         let end = now.elapsed();
 
         println!("Compiled in {} ms", end.as_millis());

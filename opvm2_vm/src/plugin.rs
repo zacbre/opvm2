@@ -1,7 +1,7 @@
 use std::{ffi::CString, io::Write};
 
 use extism::*;
-use opvm2::plugin_interface::OnInstructionValue;
+use opvm2::{parser::program::LabelValue, plugin_interface::OnInstructionValue};
 
 use crate::{register::Register, store::Store};
 
@@ -164,8 +164,15 @@ host_fn!(pub get_input(user_data: Store;) -> Result<String, String> {
 host_fn!(pub jmp_to_label(user_data: Store; label: String) -> Result<(), String> {
     let store = user_data.get()?;
     let mut store = store.lock().unwrap();
-    let address = *store.current_program.labels.list.get(&label).expect("Label not found");
-    store.registers.set_pc(address);
+    let address = store.current_program.labels.list.get(&label);
+    if address.is_none() {
+        return Err(extism::Error::msg(format!("Label '{}' does not exist!", &label)))
+    }
+    // todo: check if this is an address or a label with a literal/value?
+    match *address.unwrap() {
+        LabelValue::Address(address) => store.registers.set_pc(address),
+        _ => return Err(extism::Error::msg(format!("Label '{}' does not contain an address!", &label)))
+    };
     Ok(())
 });
 
@@ -189,7 +196,7 @@ host_fn!(pub print(user_data: Store; data: String) -> Result<(), String> {
 mod test {
     use extism::convert::Json;
     use opvm2::{
-        parser::program::{Labels, Program},
+        parser::program::{LabelValue, Labels, Program},
         register::Registers,
     };
     use serde::{Deserialize, Serialize};
@@ -297,10 +304,13 @@ mod test {
             let store = vm.store.get()?;
             let store = store.lock().unwrap();
             assert_eq!(store.current_program.labels.list.len(), 1);
-            assert_eq!(store.current_program.labels.list.get("_label"), Some(&2));
+            assert_eq!(
+                store.current_program.labels.list.get("_label"),
+                Some(&LabelValue::Address(2))
+            );
         }
         let labels = vm.plugin.plugins[0].call::<(), Labels>("get_all_labels_test", ())?;
-        assert_eq!(labels.list.get("_label"), Some(&2));
+        assert_eq!(labels.list.get("_label"), Some(&LabelValue::Address(2)));
         vm.plugin.plugins[0].call::<&str, ()>("jmp_to_label_test", "_label")?;
         let registers = read_registers(&vm);
         assert_eq!(registers.ra, 0);

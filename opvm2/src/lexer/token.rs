@@ -2,6 +2,7 @@
 pub enum Token {
     Comment(String),
     Label(String),
+    LabelWithLiteral(LabelWithLiteral),
     Directive(String),
     Expression(Expression),
 }
@@ -11,6 +12,12 @@ pub enum TokenType {
     Comment,
     Label,
     Directive,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct LabelWithLiteral {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, PartialEq)]

@@ -7,8 +7,15 @@ use crate::{instruction::Instruction, lexer::token::Token, operand::Operand};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
 #[encoding(Json)]
+pub enum LabelValue {
+    Address(u64),
+    Literal(String),
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
+#[encoding(Json)]
 pub struct Labels {
-    pub list: BTreeMap<String, u64>,
+    pub list: BTreeMap<String, LabelValue>,
 }
 
 impl Labels {
@@ -19,8 +26,8 @@ impl Labels {
     }
 }
 
-impl From<Vec<(String, u64)>> for Labels {
-    fn from(vec: Vec<(String, u64)>) -> Self {
+impl From<Vec<(String, LabelValue)>> for Labels {
+    fn from(vec: Vec<(String, LabelValue)>) -> Self {
         Self {
             list: vec.into_iter().collect(),
         }
@@ -62,7 +69,18 @@ impl Program {
                 match token {
                     Token::Label(l) => {
                         // mark the location at which the label is located at, use instructions.len()
-                        labels.list.insert(l, instructions.len() as u64);
+                        labels
+                            .list
+                            .insert(l, LabelValue::Address(instructions.len() as u64));
+                    }
+                    Token::LabelWithLiteral(l) => {
+                        // see if we can parse the l.value as a number
+                        if let Ok(val) = l.value.parse::<u64>() {
+                            labels.list.insert(l.name, LabelValue::Address(val));
+                            continue;
+                        }
+
+                        labels.list.insert(l.name, LabelValue::Literal(l.value));
                     }
                     Token::Directive(_) => todo!(),
                     Token::Expression(e) => {
@@ -99,7 +117,7 @@ impl Program {
 mod test {
     use super::Token;
     use super::*;
-    use crate::lexer::token::Expression;
+    use crate::lexer::token::{Expression, LabelWithLiteral};
     use crate::opcode::Opcode;
     use crate::operand::Operand;
     use crate::register::Register;
@@ -121,11 +139,15 @@ mod test {
             ]),
             Program {
                 instructions: vec![
-                    Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(1)),
+                    Instruction::new(
+                        Opcode::Mov,
+                        Operand::Register(Register::Ra),
+                        Operand::Number(1)
+                    ),
                     Instruction::new(
                         Opcode::Add,
-                        Operand::R(Register::Ra),
-                        Operand::R(Register::Rb)
+                        Operand::Register(Register::Ra),
+                        Operand::Register(Register::Rb)
                     ),
                 ],
                 labels: Labels::new(),
@@ -152,14 +174,70 @@ mod test {
             ]),
             Program {
                 instructions: vec![
-                    Instruction::new(Opcode::Mov, Operand::R(Register::Ra), Operand::N(1)),
+                    Instruction::new(
+                        Opcode::Mov,
+                        Operand::Register(Register::Ra),
+                        Operand::Number(1)
+                    ),
                     Instruction::new(
                         Opcode::Add,
-                        Operand::R(Register::Ra),
-                        Operand::R(Register::Rb)
+                        Operand::Register(Register::Ra),
+                        Operand::Register(Register::Rb)
                     ),
                 ],
-                labels: Labels::from(vec![("start".to_string(), 0), ("end".to_string(), 2)])
+                labels: Labels::from(vec![
+                    ("start".to_string(), LabelValue::Address(0)),
+                    ("end".to_string(), LabelValue::Address(2))
+                ])
+            }
+        )
+    }
+
+    #[test]
+    fn can_parse_labels_with_literals() {
+        assert_eq!(
+            Program::new(vec![
+                vec![Token::LabelWithLiteral(LabelWithLiteral {
+                    name: "custom".to_string(),
+                    value: "10".to_string(),
+                })],
+                vec![Token::LabelWithLiteral(LabelWithLiteral {
+                    name: "custom_str".to_string(),
+                    value: "this is my custom value".to_string(),
+                })],
+                vec![Token::Expression(Expression {
+                    opcode: "mov".to_string(),
+                    lhs: Some("ra".to_string()),
+                    rhs: Some("1".to_string()),
+                })],
+                vec![Token::Expression(Expression {
+                    opcode: "add".to_string(),
+                    lhs: Some("ra".to_string()),
+                    rhs: Some("rb".to_string()),
+                })],
+                vec![Token::Label("end".to_string())],
+            ]),
+            Program {
+                instructions: vec![
+                    Instruction::new(
+                        Opcode::Mov,
+                        Operand::Register(Register::Ra),
+                        Operand::Number(1)
+                    ),
+                    Instruction::new(
+                        Opcode::Add,
+                        Operand::Register(Register::Ra),
+                        Operand::Register(Register::Rb)
+                    ),
+                ],
+                labels: Labels::from(vec![
+                    ("custom".to_string(), LabelValue::Address(10)),
+                    (
+                        "custom_str".to_string(),
+                        LabelValue::Literal("this is my custom value".to_string())
+                    ),
+                    ("end".to_string(), LabelValue::Address(2))
+                ])
             }
         )
     }

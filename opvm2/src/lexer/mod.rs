@@ -1,6 +1,6 @@
 pub mod token;
 
-use self::token::{Expression, Token, TokenType};
+use self::token::{Expression, LabelWithLiteral, Token, TokenType};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
@@ -60,6 +60,7 @@ fn lex_line(i: &str) -> IResult<&str, Vec<Token>> {
         }
 
         let res = build_token(comment(og), TokenType::Comment)
+            .or_else(|_| literal(og))
             .or_else(|_| build_token(label(og), TokenType::Label))
             .or_else(|_| expression(og))
             .or_else(|_| build_token(directive(og), TokenType::Directive));
@@ -85,8 +86,31 @@ fn comment(i: &str) -> IResult<&str, &str> {
     )(i)
 }
 
-fn literal(i: &str) -> IResult<&str, &str> {
-    alt((literal_single_quote, literal_double_quote))(i)
+fn literal(i: &str) -> IResult<&str, Token> {
+    let (left, label) = label(i)?;
+    let (left, literal) = alt((
+        literal_single_quote,
+        literal_double_quote,
+        literal_value_only,
+    ))(left)?;
+    // if we couldn't parse any literal out of this, then we return an error.
+    if literal.len() == 0 {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            left,
+            nom::error::ErrorKind::TakeWhile1,
+        )));
+    }
+    Ok((
+        left,
+        Token::LabelWithLiteral(LabelWithLiteral {
+            name: label.to_string(),
+            value: literal.to_string(),
+        }),
+    ))
+}
+
+fn literal_value_only(i: &str) -> IResult<&str, &str> {
+    preceded(opt(whitespace), take_while(|c| (c as char).is_digit(10)))(i)
 }
 
 fn literal_single_quote(i: &str) -> IResult<&str, &str> {
@@ -127,14 +151,11 @@ fn expression(i: &str) -> IResult<&str, Token> {
 
     let (i, token) = if let Ok((i, lhs)) = preceded(
         opt(whitespace),
-        terminated(
-            alt((literal, take_until_whitespace)),
-            preceded(opt(whitespace), tag(",")),
-        ),
+        terminated(take_until_whitespace, preceded(opt(whitespace), tag(","))),
     )(i)
     {
         // get RHS
-        let (i, rhs) = preceded(opt(whitespace), alt((literal, take_until_whitespace)))(i)?;
+        let (i, rhs) = preceded(opt(whitespace), take_until_whitespace)(i)?;
         (
             i,
             Token::Expression(Expression {
@@ -144,7 +165,7 @@ fn expression(i: &str) -> IResult<&str, Token> {
             }),
         )
     } else {
-        let (i, lhs) = preceded(opt(whitespace), alt((literal, take_until_whitespace)))(i)?;
+        let (i, lhs) = preceded(opt(whitespace), take_until_whitespace)(i)?;
         (
             i,
             Token::Expression(Expression {
@@ -171,7 +192,7 @@ fn directive(i: &str) -> IResult<&str, &str> {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::token::{Expression, Token};
+    use crate::lexer::token::{Expression, LabelWithLiteral, Token};
 
     #[test]
     fn can_parse_comments() {
@@ -186,33 +207,6 @@ mod test {
         assert_eq!(
             super::comment("      ;           this is a comment"),
             Ok(("", "this is a comment"))
-        );
-    }
-
-    #[test]
-    fn can_parse_literal() {
-        assert_eq!(
-            super::literal("'this is a literal'"),
-            Ok(("", "this is a literal"))
-        );
-        assert_eq!(
-            super::literal("  'this is a literal'"),
-            Ok(("", "this is a literal"))
-        );
-        assert_eq!(
-            super::literal("  \"this is a literal\""),
-            Ok(("", "this is a literal"))
-        );
-        assert_eq!(
-            super::literal("  'this is a literal'  "),
-            Ok(("  ", "this is a literal"))
-        );
-        assert_eq!(
-            super::literal("  'this is a literal\""),
-            Err(nom::Err::Error(nom::error::Error {
-                input: "'this is a literal\"",
-                code: nom::error::ErrorKind::Tag
-            }))
         );
     }
 
@@ -276,7 +270,7 @@ mod test {
         );
 
         assert_eq!(
-            super::expression("mov rax, 'a'"),
+            super::expression("mov rax, a"),
             Ok((
                 "",
                 super::Token::Expression(super::Expression {
@@ -338,9 +332,23 @@ mod test {
     }
 
     #[test]
+    fn can_parse_label_with_literal() {
+        assert_eq!(
+            super::literal("label: 'this is a literal'"),
+            Ok((
+                "",
+                super::Token::LabelWithLiteral(LabelWithLiteral {
+                    name: "label".to_string(),
+                    value: "this is a literal".to_string()
+                })
+            ))
+        );
+    }
+
+    #[test]
     fn can_parse_line() {
         assert_eq!(
-            super::lex_line("_label: mov r0, 'a' ; comment"),
+            super::lex_line("_label: mov r0, a ; comment"),
             Ok((
                 "",
                 vec![
@@ -361,14 +369,24 @@ mod test {
         assert_eq!(
             super::lex_input(
                 r"
+                name: 'hello this is my name'
+                another: 5
             section .data
                 _label: eeeee rax, 0
-                        mov rcx, 'a'
+                        mov rcx, a
                         jmp _label
                         print rcx
         "
             ),
             Ok(vec![
+                vec![Token::LabelWithLiteral(LabelWithLiteral {
+                    name: "name".to_string(),
+                    value: "hello this is my name".to_string()
+                })],
+                vec![Token::LabelWithLiteral(LabelWithLiteral {
+                    name: "another".to_string(),
+                    value: "5".to_string()
+                })],
                 vec![Token::Directive("data".to_string())],
                 vec![
                     Token::Label("_label".to_string()),
