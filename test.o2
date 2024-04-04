@@ -1,5 +1,5 @@
+end: 'this is a test'
 loop: add ra, end
       print ra
       test ra, 10
       jl loop
-end:  nop

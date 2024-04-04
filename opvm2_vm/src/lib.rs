@@ -1,12 +1,13 @@
+pub mod heap;
+pub mod machine_context;
 pub mod plugin;
-pub mod store;
 pub mod vm;
 
 use extism::{convert::Json, FromBytes, ToBytes, UserData};
+use machine_context::MachineContext;
 use opvm2::{opcode::Opcode, parser::program::Program, *};
 use plugin::PluginLoader;
 use serde::{Deserialize, Serialize};
-use store::Store;
 
 #[derive(Debug, Deserialize, Serialize, ToBytes, FromBytes, PartialEq, Clone)]
 #[encoding(Json)]
@@ -23,7 +24,7 @@ impl CompiledProgram {
     pub fn compile(&self) -> Result<Vec<u8>, String> {
         // todo: find out if we have all the plugins we need before we compile.
         // load each plugin in the plugin loader
-        let mut loader = PluginLoader::new(UserData::new(Store::new()));
+        let mut loader = PluginLoader::new(UserData::new(MachineContext::new()));
         loader.load_all(self.plugins.clone())?;
         let mut err_msg = String::new();
         for ins in self.program.instructions.iter() {
@@ -80,9 +81,9 @@ mod test {
     use crate::{parser::program::Program, vm::Vm};
 
     fn read_registers(vm: &Vm) -> Registers {
-        let store = vm.store.get().unwrap();
-        let store = store.lock().unwrap();
-        store.registers.clone()
+        let context = vm.context.get().unwrap();
+        let context = context.lock().unwrap();
+        context.registers.clone()
     }
 
     #[test]

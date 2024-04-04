@@ -1,11 +1,13 @@
 pub mod token;
 
-use self::token::{Expression, LabelWithLiteral, Token, TokenType};
+use self::token::{Expression, ExpressionOffset, LabelWithLiteral, SideType, Token, TokenType};
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while, take_while1},
-    combinator::opt,
-    sequence::{delimited, preceded, terminated},
+    bytes::complete::{tag, take_until1, take_while, take_while1},
+    character::complete::one_of,
+    combinator::{opt, recognize},
+    error::Error,
+    sequence::{delimited, preceded, terminated, tuple},
     IResult,
 };
 
@@ -62,8 +64,8 @@ fn lex_line(i: &str) -> IResult<&str, Vec<Token>> {
         let res = build_token(comment(og), TokenType::Comment)
             .or_else(|_| literal(og))
             .or_else(|_| build_token(label(og), TokenType::Label))
-            .or_else(|_| expression(og))
-            .or_else(|_| build_token(directive(og), TokenType::Directive));
+            .or_else(|_| build_token(directive(og), TokenType::Directive))
+            .or_else(|_| expression(og));
         if let Ok((out, tok)) = res {
             tokens.push(tok);
             og = out;
@@ -131,6 +133,10 @@ fn take_until_whitespace(i: &str) -> IResult<&str, &str> {
     take_while1(|c| (c as char).is_alphanumeric() || c == '_')(i)
 }
 
+fn take_until_whitespace_with_offset(i: &str) -> IResult<&str, &str> {
+    recognize(delimited(tag("["), take_until1("]"), tag("]")))(i)
+}
+
 fn expression(i: &str) -> IResult<&str, Token> {
     // this expression needs an opcode, and then operands, potentially registers or literals.
     let (i, opcode) = preceded(
@@ -143,40 +149,69 @@ fn expression(i: &str) -> IResult<&str, Token> {
             i,
             Token::Expression(Expression {
                 opcode: opcode.to_string(),
-                lhs: None,
-                rhs: None,
+                lhs: SideType::None,
+                rhs: SideType::None,
             }),
         ));
     }
 
-    let (i, token) = if let Ok((i, lhs)) = preceded(
-        opt(whitespace),
-        terminated(take_until_whitespace, preceded(opt(whitespace), tag(","))),
-    )(i)
-    {
-        // get RHS
-        let (i, rhs) = preceded(opt(whitespace), take_until_whitespace)(i)?;
-        (
-            i,
-            Token::Expression(Expression {
-                opcode: opcode.to_string(),
-                lhs: Some(lhs.to_string()),
-                rhs: Some(rhs.to_string()),
-            }),
-        )
-    } else {
-        let (i, lhs) = preceded(opt(whitespace), take_until_whitespace)(i)?;
-        (
-            i,
-            Token::Expression(Expression {
-                opcode: opcode.to_string(),
-                lhs: Some(lhs.to_string()),
-                rhs: None,
-            }),
-        )
-    };
+    let mut parser = tuple((
+        preceded(opt(whitespace), opt(take_until_whitespace)),
+        opt(tag::<_, _, Error<_>>(",")),
+        preceded(
+            opt(whitespace),
+            opt(alt((
+                take_until_whitespace,
+                take_until_whitespace_with_offset,
+            ))),
+        ),
+    ));
 
-    Ok((i, token))
+    let (i, (lhs, _, rhs)) = parser(i)?;
+
+    Ok((
+        i,
+        Token::Expression(Expression {
+            opcode: opcode.to_string(),
+            lhs: side_type_or_none(lhs),
+            rhs: side_type_or_none(rhs),
+        }),
+    ))
+}
+
+fn side_type_or_none(i: Option<&str>) -> SideType {
+    match i {
+        Some(s) => {
+            let e_offset = expression_offset(s).map(|(_, e)| SideType::Offset(e));
+            match e_offset {
+                Ok(e) => e,
+                Err(_) => SideType::Normal(s.to_string()),
+            }
+        }
+        None => SideType::None,
+    }
+}
+
+fn expression_offset(i: &str) -> IResult<&str, ExpressionOffset> {
+    let mut parser = delimited(
+        preceded(opt(whitespace), tag("[")),
+        tuple((
+            preceded(opt(whitespace), take_until_whitespace),
+            preceded(opt(whitespace), opt(one_of("+-"))),
+            preceded(opt(whitespace), opt(take_until_whitespace)),
+        )),
+        preceded(opt(whitespace), tag("]")),
+    );
+    let (i, (lhs, operator, rhs)) = parser(i)?;
+
+    Ok((
+        i,
+        ExpressionOffset {
+            lhs: lhs.to_string(),
+            operator: operator.map(|c| c.to_string()),
+            rhs: rhs.map(|s| s.to_string()),
+        },
+    ))
 }
 
 fn whitespace(i: &str) -> IResult<&str, &str> {
@@ -192,7 +227,7 @@ fn directive(i: &str) -> IResult<&str, &str> {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::token::{Expression, LabelWithLiteral, Token};
+    use crate::lexer::token::{Expression, ExpressionOffset, LabelWithLiteral, SideType, Token};
 
     #[test]
     fn can_parse_comments() {
@@ -263,8 +298,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("rax".to_string()),
-                    rhs: Some("rdx".to_string())
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::Normal("rdx".to_string())
                 })
             ))
         );
@@ -275,8 +310,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("rax".to_string()),
-                    rhs: Some("a".to_string())
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::Normal("a".to_string())
                 })
             ))
         );
@@ -287,8 +322,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "print".to_string(),
-                    lhs: Some("rax".to_string()),
-                    rhs: None
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::None
                 })
             ))
         );
@@ -299,8 +334,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "ret".to_string(),
-                    lhs: None,
-                    rhs: None
+                    lhs: SideType::None,
+                    rhs: SideType::None
                 })
             ))
         );
@@ -311,8 +346,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "ret".to_string(),
-                    lhs: None,
-                    rhs: None
+                    lhs: SideType::None,
+                    rhs: SideType::None
                 })
             ))
         );
@@ -324,8 +359,8 @@ mod test {
                 "",
                 super::Token::Expression(super::Expression {
                     opcode: "mov_op".to_string(),
-                    lhs: Some("rax".to_string()),
-                    rhs: Some("rdx".to_string())
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::Normal("rdx".to_string())
                 })
             ))
         );
@@ -355,8 +390,8 @@ mod test {
                     super::Token::Label("_label".to_string()),
                     super::Token::Expression(super::Expression {
                         opcode: "mov".to_string(),
-                        lhs: Some("r0".to_string()),
-                        rhs: Some("a".to_string())
+                        lhs: SideType::Normal("r0".to_string()),
+                        rhs: SideType::Normal("a".to_string())
                     }),
                     super::Token::Comment("comment".to_string())
                 ]
@@ -392,26 +427,104 @@ mod test {
                     Token::Label("_label".to_string()),
                     Token::Expression(Expression {
                         opcode: "eeeee".to_string(),
-                        lhs: Some("rax".to_string()),
-                        rhs: Some("0".to_string())
+                        lhs: SideType::Normal("rax".to_string()),
+                        rhs: SideType::Normal("0".to_string())
                     })
                 ],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("rcx".to_string()),
-                    rhs: Some("a".to_string())
+                    lhs: SideType::Normal("rcx".to_string()),
+                    rhs: SideType::Normal("a".to_string())
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "jmp".to_string(),
-                    lhs: Some("_label".to_string()),
-                    rhs: None
+                    lhs: SideType::Normal("_label".to_string()),
+                    rhs: SideType::None
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "print".to_string(),
-                    lhs: Some("rcx".to_string()),
-                    rhs: None
+                    lhs: SideType::Normal("rcx".to_string()),
+                    rhs: SideType::None
                 })]
             ])
+        );
+    }
+
+    #[test]
+    fn can_parse_expression_offset() {
+        assert_eq!(
+            super::expression_offset("[rdx + 0x10]"),
+            Ok((
+                "",
+                super::ExpressionOffset {
+                    lhs: "rdx".to_string(),
+                    operator: Some("+".to_string()),
+                    rhs: Some("0x10".to_string())
+                }
+            ))
+        );
+
+        assert_eq!(
+            super::expression_offset(" [rdx + 0x10]"),
+            Ok((
+                "",
+                super::ExpressionOffset {
+                    lhs: "rdx".to_string(),
+                    operator: Some("+".to_string()),
+                    rhs: Some("0x10".to_string())
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn can_parse_expression_with_offsets() {
+        assert_eq!(
+            super::expression("mov rax, [rdx + 0x10]"),
+            Ok((
+                "",
+                super::Token::Expression(super::Expression {
+                    opcode: "mov".to_string(),
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::Offset(ExpressionOffset {
+                        lhs: "rdx".to_string(),
+                        operator: Some("+".to_string()),
+                        rhs: Some("0x10".to_string())
+                    })
+                })
+            ))
+        );
+
+        assert_eq!(
+            super::expression("mov rax, [label]"),
+            Ok((
+                "",
+                super::Token::Expression(super::Expression {
+                    opcode: "mov".to_string(),
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::Offset(ExpressionOffset {
+                        lhs: "label".to_string(),
+                        operator: None,
+                        rhs: None
+                    })
+                })
+            ))
+        );
+
+        assert_eq!(
+            super::expression("mov rax, [label -]"),
+            Ok((
+                "",
+                super::Token::Expression(super::Expression {
+                    opcode: "mov".to_string(),
+                    lhs: SideType::Normal("rax".to_string()),
+                    rhs: SideType::Offset(ExpressionOffset {
+                        lhs: "label".to_string(),
+                        operator: Some("-".to_string()),
+                        rhs: None
+                    })
+                })
+            ))
         );
     }
 }

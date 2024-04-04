@@ -4,48 +4,49 @@ use extism::UserData;
 use opvm2::{parser::program::LabelValue, plugin_interface::OnInstructionValue};
 
 use crate::{
-    opcode::Opcode, operand::Operand, parser::program::Program, plugin::PluginLoader, store::Store,
+    machine_context::MachineContext, opcode::Opcode, operand::Operand, parser::program::Program,
+    plugin::PluginLoader,
 };
 
 #[derive(Debug)]
 pub struct Vm {
     // todo: this stuff should live in a machine context? that plugins have access to? then the VM should also have access to
     // at the same level as the plugin
-    pub store: UserData<Store>,
+    pub context: UserData<MachineContext>,
     pub plugin: PluginLoader,
 }
 
 impl Vm {
-    pub fn new(store: Store) -> Vm {
-        let store = UserData::new(store);
+    pub fn new(context: MachineContext) -> Vm {
+        let context = UserData::new(context);
 
         Vm {
-            store: store.clone(),
-            plugin: PluginLoader::new(store),
+            context: context.clone(),
+            plugin: PluginLoader::new(context),
         }
     }
 
     pub fn new_e() -> Vm {
-        let store = UserData::new(Store::new());
+        let context = UserData::new(MachineContext::new());
 
         Vm {
-            store: store.clone(),
-            plugin: PluginLoader::new(store),
+            context: context.clone(),
+            plugin: PluginLoader::new(context),
         }
     }
 
     pub fn check_pc(&self) -> u64 {
-        let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-        let store = store.lock().unwrap();
-        *store.registers.clone().check_pc()
+        let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+        let context = context.lock().unwrap();
+        *context.registers.clone().check_pc()
     }
 
     pub fn run(&mut self, program: Program) -> Result<(), String> {
-        // every time we need access to the store, we need to unlock it.
+        // every time we need access to the context, we need to unlock it.
         {
-            let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-            let mut store = store.lock().unwrap();
-            store.current_program = program.clone();
+            let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+            let mut context = context.lock().unwrap();
+            context.current_program = program.clone();
         }
         'outer: while (self.check_pc() as usize) < program.instructions.len() {
             let pc = self.check_pc();
@@ -71,31 +72,44 @@ impl Vm {
                 Err(e) => return Err(e),
             };
 
-            let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-            let mut store = store.lock().unwrap();
+            let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+            let mut context = context.lock().unwrap();
             let (lhs, rhs) = (
-                self.get_value(&mut store, &item.lhs)?,
-                self.get_value(&mut store, &item.rhs)?,
+                self.get_value(&mut context, &item.lhs)?,
+                self.get_value(&mut context, &item.rhs)?,
             );
 
             match item.opcode.clone() {
                 Opcode::Mov => {
+                    // todo: handle operands with offsets here?
                     let lhs = item.lhs.get_register()?;
-                    store.registers.set(&lhs, rhs.expect("rhs is None"));
+                    context.registers.set(&lhs, rhs.expect("rhs is None"));
                 }
-                Opcode::Add => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
-                Opcode::Sub => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
-                Opcode::Mul => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
-                Opcode::Div => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
-                Opcode::Mod => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
-                Opcode::Xor => self.math(&mut store, &item.lhs, &item.rhs, item.opcode.clone())?,
+                Opcode::Add => {
+                    self.math(&mut context, &item.lhs, &item.rhs, item.opcode.clone())?
+                }
+                Opcode::Sub => {
+                    self.math(&mut context, &item.lhs, &item.rhs, item.opcode.clone())?
+                }
+                Opcode::Mul => {
+                    self.math(&mut context, &item.lhs, &item.rhs, item.opcode.clone())?
+                }
+                Opcode::Div => {
+                    self.math(&mut context, &item.lhs, &item.rhs, item.opcode.clone())?
+                }
+                Opcode::Mod => {
+                    self.math(&mut context, &item.lhs, &item.rhs, item.opcode.clone())?
+                }
+                Opcode::Xor => {
+                    self.math(&mut context, &item.lhs, &item.rhs, item.opcode.clone())?
+                }
                 Opcode::Inc => {
-                    store
+                    context
                         .registers
                         .set(&item.lhs.get_register()?, lhs.expect("lhs is none") + 1);
                 }
                 Opcode::Dec => {
-                    store
+                    context
                         .registers
                         .set(&item.lhs.get_register()?, lhs.expect("lhs is none") - 1);
                 }
@@ -103,81 +117,82 @@ impl Vm {
                     print!("{}", lhs.expect("lhs is none"));
                 }
                 Opcode::Push => {
-                    store.stack.push(lhs.expect("lhs is none"));
+                    context.stack.push(lhs.expect("lhs is none"));
                 }
                 Opcode::Pop => {
                     let lhs = item.lhs.get_register()?;
-                    let value = store.stack.pop().unwrap();
-                    store.registers.set(&lhs, value);
+                    let value = context.stack.pop().unwrap();
+                    context.registers.set(&lhs, value);
                 }
                 Opcode::Dup => {
-                    let peeked = *store.stack.peek().unwrap();
-                    store.stack.push(peeked);
+                    let peeked = *context.stack.peek().unwrap();
+                    context.stack.push(peeked);
                 }
-                Opcode::Test => self.test(&mut store, &item.lhs, &item.rhs),
+                Opcode::Test => self.test(&mut context, &item.lhs, &item.rhs),
                 Opcode::Jmp => {
-                    store.registers.set_pc(lhs.expect("lhs is none"));
+                    context.registers.set_pc(lhs.expect("lhs is none"));
                     continue;
                 }
                 Opcode::Je => {
-                    if store.registers.check_equals_flag() {
-                        store.registers.set_pc(lhs.expect("lhs is none"));
+                    if context.registers.check_equals_flag() {
+                        context.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jne => {
-                    if !store.registers.check_equals_flag() {
-                        store.registers.set_pc(lhs.expect("lhs is none"));
+                    if !context.registers.check_equals_flag() {
+                        context.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jle => {
-                    if store.registers.check_equals_flag() || store.registers.check_less_than_flag()
+                    if context.registers.check_equals_flag()
+                        || context.registers.check_less_than_flag()
                     {
-                        store.registers.set_pc(lhs.expect("lhs is none"));
+                        context.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jge => {
-                    if store.registers.check_equals_flag()
-                        || store.registers.check_greater_than_flag()
+                    if context.registers.check_equals_flag()
+                        || context.registers.check_greater_than_flag()
                     {
-                        store.registers.set_pc(lhs.expect("lhs is none"));
+                        context.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jl => {
-                    if store.registers.check_less_than_flag() {
-                        store.registers.set_pc(lhs.expect("lhs is none"));
+                    if context.registers.check_less_than_flag() {
+                        context.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jg => {
-                    if store.registers.check_greater_than_flag() {
-                        store.registers.set_pc(lhs.expect("lhs is none"));
+                    if context.registers.check_greater_than_flag() {
+                        context.registers.set_pc(lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Call => {
-                    let call_stack_pointer = store.registers.check_pc() + 1;
-                    store.call_stack.push(call_stack_pointer);
-                    store.registers.set_pc(lhs.expect("lhs is none"));
+                    let call_stack_pointer = context.registers.check_pc() + 1;
+                    context.call_stack.push(call_stack_pointer);
+                    context.registers.set_pc(lhs.expect("lhs is none"));
                     continue;
                 }
                 Opcode::Return => {
-                    let return_address = store.call_stack.pop().unwrap();
-                    store.registers.set_pc(return_address);
+                    let return_address = context.call_stack.pop().unwrap();
+                    context.registers.set_pc(return_address);
                     continue;
                 }
                 Opcode::Assert => {
-                    self.test(&mut store, &item.lhs, &item.rhs);
-                    if !store.registers.check_equals_flag() {
+                    self.test(&mut context, &item.lhs, &item.rhs);
+                    if !context.registers.check_equals_flag() {
                         return Err(format!(
                             "Assertion failed at ins {}.",
-                            store.registers.check_pc()
+                            context.registers.check_pc()
                         ));
                     }
-                    store.registers.reset_flags();
+                    context.registers.reset_flags();
                 }
                 Opcode::Sleep => {
                     std::thread::sleep(std::time::Duration::from_millis(
@@ -193,57 +208,79 @@ impl Vm {
                     return Err(format!("Plugin for '{}' not found", s));
                 }
             }
-            store.registers.increment_pc();
+            context.registers.increment_pc();
         }
         // bug in rust perhaps? using print! causes a % to be outputted if no newline is printed afterwards.
         println!("");
         Ok(())
     }
 
-    fn test(&mut self, store: &mut MutexGuard<Store>, lhs: &Operand, rhs: &Operand) {
-        let lhs_value = self.get_value(store, lhs);
-        let rhs_value = self.get_value(store, rhs);
-        store.registers.reset_flags();
+    fn test(&mut self, context: &mut MutexGuard<MachineContext>, lhs: &Operand, rhs: &Operand) {
+        let lhs_value = self.get_value(context, lhs);
+        let rhs_value = self.get_value(context, rhs);
+        context.registers.reset_flags();
         if lhs_value == rhs_value {
-            store.registers.set_equals_flag(true);
+            context.registers.set_equals_flag(true);
         }
         if lhs_value < rhs_value {
-            store.registers.set_less_than_flag(true);
+            context.registers.set_less_than_flag(true);
         }
         if lhs_value > rhs_value {
-            store.registers.set_greater_than_flag(true);
+            context.registers.set_greater_than_flag(true);
         }
     }
 
     fn get_value(
         &self,
-        store: &mut MutexGuard<Store>,
+        context: &mut MutexGuard<MachineContext>,
         operand: &Operand,
     ) -> Result<Option<u64>, String> {
         match operand {
             Operand::Number(n) => Ok(Some(*n)),
-            Operand::Register(r) => Ok(Some(store.registers.get(&r))),
+            Operand::Register(r) => Ok(Some(context.registers.get(&r))),
             Operand::Label(l) => {
-                let value = store.current_program.labels.list.get(l).unwrap().clone();
+                let value = context.current_program.labels.list.get(l).unwrap().clone();
                 match value {
                     LabelValue::Address(n) => Ok(Some(n)),
                     // todo: address of label value? not sure how to implement this just yet.
                     LabelValue::Literal(_l) => Ok(None),
                 }
             }
+            // Operand::Offset(o) => {
+            // what we want to do here is get the value at the specified offset.
+            // if it is just a single lhs then we want to get the address?
+            // if it is a lhs and rhs then we want to get the value at the address + offset
+            // in the future, to get an address and specify an offset, we will do something like this:
+            // mov lhs, [rhs] + operand
+
+            // let lhs: Operand = o.lhs_operand.try_into()?;
+            // match o.rhs_operand {
+            //     Some(rhs) => {
+            //         let rhs: Operand = rhs.try_into()?;
+            //         self.math(context, &lhs, &rhs)?;
+            //     }
+            //     None => {
+            //         // get the address of the lhs.
+            //         // this should only work when X is a label?
+            //     }
+            // }
+            // // match the operator
+
+            // Ok(Some(value + offset))
+            // }
             _ => Ok(None),
         }
     }
 
     fn math(
         &mut self,
-        store: &mut MutexGuard<Store>,
+        context: &mut MutexGuard<MachineContext>,
         lhs: &Operand,
         rhs: &Operand,
         operator: Opcode,
     ) -> Result<(), String> {
-        let lhs_value = self.get_value(store, lhs)?.expect("lhs is none");
-        let rhs_value = self.get_value(store, rhs)?.expect("rhs is none");
+        let lhs_value = self.get_value(context, lhs)?.expect("lhs is none");
+        let rhs_value = self.get_value(context, rhs)?.expect("rhs is none");
         let value = match operator {
             Opcode::Add => lhs_value + rhs_value,
             Opcode::Sub => lhs_value - rhs_value,
@@ -254,7 +291,7 @@ impl Vm {
             _ => panic!("Invalid operator for math operation"),
         };
 
-        store.registers.set(&lhs.get_register()?, value);
+        context.registers.set(&lhs.get_register()?, value);
 
         Ok(())
     }
@@ -289,15 +326,15 @@ mod test {
     }
 
     fn read_registers(vm: &Vm) -> Registers {
-        let store = vm.store.get().map_err(|e| e.to_string()).unwrap();
-        let store = store.lock().unwrap();
-        store.registers.clone()
+        let context = vm.context.get().map_err(|e| e.to_string()).unwrap();
+        let context = context.lock().unwrap();
+        context.registers.clone()
     }
 
     fn pop_stack(vm: &mut Vm) -> Result<u64, String> {
-        let store = vm.store.get().map_err(|e| e.to_string()).unwrap();
-        let mut store = store.lock().unwrap();
-        store.stack.pop().ok_or("Stack is empty".to_string())
+        let context = vm.context.get().map_err(|e| e.to_string()).unwrap();
+        let mut context = context.lock().unwrap();
+        context.stack.pop().ok_or("Stack is empty".to_string())
     }
 
     use super::Vm;

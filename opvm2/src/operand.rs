@@ -12,12 +12,30 @@ pub enum Operand {
     Register(Register),
     Number(u64),
     Label(String),
+    Offset(Offset),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, ToBytes, FromBytes)]
+#[encoding(Json)]
+pub struct Offset {
+    pub lhs_operand: String,
+    pub operator: Option<String>,
+    pub rhs_operand: Option<String>,
 }
 
 impl TryFrom<String> for Operand {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.starts_with("[") && value.ends_with("]") {
+            // let value = value.trim_start_matches("[").trim_end_matches("]");
+            // // perhaps we parse this instead with the parser?
+            // let mut parts = value.split("+");
+            // let operand = parts.next().unwrap().to_string();
+            // let offset = parts.next().map(|x| x.parse::<u64>().unwrap());
+            // return Ok(Operand::Offset(Offset { operand, offset }));
+        }
+
         // start trying from.
         if let Ok(val) = value.parse::<u64>() {
             return Ok(Operand::Number(val));

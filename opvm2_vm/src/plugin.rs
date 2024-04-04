@@ -3,12 +3,12 @@ use std::{ffi::CString, io::Write};
 use extism::*;
 use opvm2::{parser::program::LabelValue, plugin_interface::OnInstructionValue};
 
-use crate::{register::Register, store::Store};
+use crate::{machine_context::MachineContext, register::Register};
 
 #[derive(Debug)]
 pub struct PluginLoader {
     pub plugins: Vec<Plugin>,
-    store: UserData<Store>,
+    context: UserData<MachineContext>,
 }
 
 // extern "C" fn log(data: *const std::ffi::c_char, _size: Size) {
@@ -19,7 +19,7 @@ pub struct PluginLoader {
 // }
 
 impl PluginLoader {
-    pub fn new(store: UserData<Store>) -> Self {
+    pub fn new(context: UserData<MachineContext>) -> Self {
         unsafe {
             if !cfg!(test) {
                 let stdout = CString::new("stdout").unwrap();
@@ -32,7 +32,7 @@ impl PluginLoader {
         }
         Self {
             plugins: vec![],
-            store,
+            context,
         }
     }
 
@@ -52,13 +52,13 @@ impl PluginLoader {
                 .call::<&OnInstructionValue, Option<u64>>(&name, &ins)
                 .map_err(|e| e.to_string())?;
 
-            let store = self.store.get().map_err(|e| e.to_string()).unwrap();
-            let mut store = store.lock().unwrap();
+            let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+            let mut context = context.lock().unwrap();
             match addr {
-                Some(addr) => store.registers.set_pc(addr),
+                Some(addr) => context.registers.set_pc(addr),
                 None => {
                     if !is_hook {
-                        store.registers.increment_pc()
+                        context.registers.increment_pc()
                     }
                 }
             }
@@ -88,30 +88,36 @@ impl PluginLoader {
                 "all_registers",
                 [],
                 [PTR],
-                self.store.clone(),
+                self.context.clone(),
                 all_registers,
             )
             .with_function(
                 "get_register",
                 [PTR],
                 [PTR],
-                self.store.clone(),
+                self.context.clone(),
                 get_register,
             )
             .with_function(
                 "set_register",
                 [PTR, PTR],
                 [],
-                self.store.clone(),
+                self.context.clone(),
                 set_register,
             )
-            .with_function("push_stack", [PTR], [], self.store.clone(), push_stack)
-            .with_function("pop_stack", [], [PTR], self.store.clone(), pop_stack)
-            .with_function("get_input", [], [PTR], self.store.clone(), get_input)
-            .with_function("jmp_to_label", [PTR], [], self.store.clone(), jmp_to_label)
-            .with_function("get_labels", [], [PTR], self.store.clone(), get_labels)
-            .with_function("quit", [], [], self.store.clone(), quit)
-            .with_function("print", [PTR], [], self.store.clone(), print)
+            .with_function("push_stack", [PTR], [], self.context.clone(), push_stack)
+            .with_function("pop_stack", [], [PTR], self.context.clone(), pop_stack)
+            .with_function("get_input", [], [PTR], self.context.clone(), get_input)
+            .with_function(
+                "jmp_to_label",
+                [PTR],
+                [],
+                self.context.clone(),
+                jmp_to_label,
+            )
+            .with_function("get_labels", [], [PTR], self.context.clone(), get_labels)
+            .with_function("quit", [], [], self.context.clone(), quit)
+            .with_function("print", [PTR], [], self.context.clone(), print)
             .build()
             .unwrap();
         if !plugin.function_exists("name") {
@@ -123,70 +129,70 @@ impl PluginLoader {
     }
 }
 
-host_fn!(pub all_registers(user_data: Store;) -> Result<Registers, String> {
-    let store = user_data.get()?;
-    let store = store.lock().unwrap();
-    Ok(store.registers.clone())
+host_fn!(pub all_registers(user_data: MachineContext;) -> Result<Registers, String> {
+    let context = user_data.get()?;
+    let context = context.lock().unwrap();
+    Ok(context.registers.clone())
 });
 
-host_fn!(pub get_register(user_data: Store; register: Register) -> Result<u64, String> {
-    let store = user_data.get()?;
-    let store = store.lock().unwrap();
-    Ok(store.registers.get(&register))
+host_fn!(pub get_register(user_data: MachineContext; register: Register) -> Result<u64, String> {
+    let context = user_data.get()?;
+    let context = context.lock().unwrap();
+    Ok(context.registers.get(&register))
 });
 
-host_fn!(pub set_register(user_data: Store; register: Register, value: u64) -> Result<()> {
-    let store = user_data.get()?;
-    let mut store = store.lock().unwrap();
-    store.registers.set(&register, value);
+host_fn!(pub set_register(user_data: MachineContext; register: Register, value: u64) -> Result<()> {
+    let context = user_data.get()?;
+    let mut context = context.lock().unwrap();
+    context.registers.set(&register, value);
     Ok(())
 });
 
-host_fn!(pub push_stack(user_data: Store; value: u64) -> Result<()> {
-    let store = user_data.get()?;
-    let mut store = store.lock().unwrap();
-    store.stack.push(value);
+host_fn!(pub push_stack(user_data: MachineContext; value: u64) -> Result<()> {
+    let context = user_data.get()?;
+    let mut context = context.lock().unwrap();
+    context.stack.push(value);
     Ok(())
 });
 
-host_fn!(pub pop_stack(user_data: Store;) -> Result<u64, String> {
-    let store = user_data.get()?;
-    let mut store = store.lock().unwrap();
-    Ok(store.stack.pop().unwrap())
+host_fn!(pub pop_stack(user_data: MachineContext;) -> Result<u64, String> {
+    let context = user_data.get()?;
+    let mut context = context.lock().unwrap();
+    Ok(context.stack.pop().unwrap())
 });
 
-host_fn!(pub get_input(user_data: Store;) -> Result<String, String> {
+host_fn!(pub get_input(user_data: MachineContext;) -> Result<String, String> {
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
     Ok(input)
 });
 
-host_fn!(pub jmp_to_label(user_data: Store; label: String) -> Result<(), String> {
-    let store = user_data.get()?;
-    let mut store = store.lock().unwrap();
-    let address = store.current_program.labels.list.get(&label);
+host_fn!(pub jmp_to_label(user_data: MachineContext; label: String) -> Result<(), String> {
+    let context = user_data.get()?;
+    let mut context = context.lock().unwrap();
+    let address = context.current_program.labels.list.get(&label);
     if address.is_none() {
         return Err(extism::Error::msg(format!("Label '{}' does not exist!", &label)))
     }
     // todo: check if this is an address or a label with a literal/value?
     match *address.unwrap() {
-        LabelValue::Address(address) => store.registers.set_pc(address),
+        LabelValue::Address(address) => context.registers.set_pc(address),
         _ => return Err(extism::Error::msg(format!("Label '{}' does not contain an address!", &label)))
     };
     Ok(())
 });
 
-host_fn!(pub get_labels(user_data: Store;) -> Result<Labels, String> {
-    let store = user_data.get()?;
-    let store = store.lock().unwrap();
-    Ok(store.current_program.labels.clone())
+host_fn!(pub get_labels(user_data: MachineContext;) -> Result<Labels, String> {
+    let context = user_data.get()?;
+    let context = context.lock().unwrap();
+    Ok(context.current_program.labels.clone())
 });
 
-host_fn!(pub quit(user_data: Store;) -> Result<(), String> {
+host_fn!(pub quit(user_data: MachineContext;) -> Result<(), String> {
     std::process::exit(0)
 });
 
-host_fn!(pub print(user_data: Store; data: String) -> Result<(), String> {
+host_fn!(pub print(user_data: MachineContext; data: String) -> Result<(), String> {
    print!("{}", data);
    std::io::stdout().flush()?;
    Ok(())
@@ -204,14 +210,14 @@ mod test {
     use crate::{register::Register, vm::Vm};
 
     fn read_registers(vm: &Vm) -> Registers {
-        let store = vm.store.get().map_err(|e| e.to_string()).unwrap();
-        let store = store.lock().unwrap();
-        store.registers.clone()
+        let context = vm.context.get().map_err(|e| e.to_string()).unwrap();
+        let context = context.lock().unwrap();
+        context.registers.clone()
     }
 
     fn load_vm() -> Vm {
-        let store = super::Store::new();
-        let mut vm = crate::vm::Vm::new(store);
+        let context = super::MachineContext::new();
+        let mut vm = crate::vm::Vm::new(context);
         vm.plugin
             .load_from_path("../target/wasm32-unknown-unknown/debug/plugin_test.wasm")
             .unwrap();
@@ -272,7 +278,7 @@ mod test {
     fn can_use_plugin_to_push_and_pop_stack() -> Result<(), extism::Error> {
         let mut vm = load_vm();
         vm.plugin.plugins[0].call::<u64, ()>("push_stack_test", 5)?;
-        assert_eq!(vm.store.get()?.lock().unwrap().stack.peek(), Some(&5));
+        assert_eq!(vm.context.get()?.lock().unwrap().stack.peek(), Some(&5));
         let result = vm.plugin.plugins[0].call::<(), u64>("pop_stack_test", ());
         assert_eq!(result.unwrap(), 5);
         Ok(())
@@ -301,11 +307,11 @@ mod test {
         ))
         .map_err(|e| extism::Error::msg(e.to_string()))?;
         {
-            let store = vm.store.get()?;
-            let store = store.lock().unwrap();
-            assert_eq!(store.current_program.labels.list.len(), 1);
+            let context = vm.context.get()?;
+            let context = context.lock().unwrap();
+            assert_eq!(context.current_program.labels.list.len(), 1);
             assert_eq!(
-                store.current_program.labels.list.get("_label"),
+                context.current_program.labels.list.get("_label"),
                 Some(&LabelValue::Address(2))
             );
         }

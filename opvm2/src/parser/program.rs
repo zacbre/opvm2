@@ -3,7 +3,11 @@ use std::collections::BTreeMap;
 use extism_pdk::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
 
-use crate::{instruction::Instruction, lexer::token::Token, operand::Operand};
+use crate::{
+    instruction::Instruction,
+    lexer::token::{SideType, Token},
+    operand::{Offset, Operand},
+};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
 #[encoding(Json)]
@@ -84,14 +88,8 @@ impl Program {
                     }
                     Token::Directive(_) => todo!(),
                     Token::Expression(e) => {
-                        let lhs = match e.lhs {
-                            Some(lhs) => lhs.try_into()?,
-                            None => Operand::None,
-                        };
-                        let rhs = match e.rhs {
-                            Some(rhs) => rhs.try_into()?,
-                            None => Operand::None,
-                        };
+                        let lhs = Self::parse_side_type(e.lhs)?;
+                        let rhs = Self::parse_side_type(e.rhs)?;
                         let instruction = Instruction::new(e.opcode.into(), lhs, rhs);
                         instructions.push(instruction);
                     }
@@ -102,6 +100,18 @@ impl Program {
         Ok(Program {
             instructions,
             labels,
+        })
+    }
+
+    fn parse_side_type(s: SideType) -> Result<Operand, String> {
+        Ok(match s {
+            SideType::Normal(rhs) => rhs.try_into()?,
+            SideType::Offset(offset) => Operand::Offset(Offset {
+                lhs_operand: offset.lhs,
+                operator: offset.operator,
+                rhs_operand: offset.rhs,
+            }),
+            SideType::None => Operand::None,
         })
     }
 
@@ -117,7 +127,7 @@ impl Program {
 mod test {
     use super::Token;
     use super::*;
-    use crate::lexer::token::{Expression, LabelWithLiteral};
+    use crate::lexer::token::{Expression, ExpressionOffset, LabelWithLiteral};
     use crate::opcode::Opcode;
     use crate::operand::Operand;
     use crate::register::Register;
@@ -128,13 +138,13 @@ mod test {
             Program::new(vec![
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("1".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("rb".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("rb".to_string()),
                 })],
             ]),
             Program {
@@ -162,13 +172,13 @@ mod test {
                 vec![Token::Label("start".to_string())],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("1".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("rb".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("rb".to_string()),
                 })],
                 vec![Token::Label("end".to_string())],
             ]),
@@ -207,13 +217,13 @@ mod test {
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("1".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("rb".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("rb".to_string()),
                 })],
                 vec![Token::Label("end".to_string())],
             ]),
@@ -240,5 +250,56 @@ mod test {
                 ])
             }
         )
+    }
+
+    #[test]
+    fn can_parse_expressions_with_offsets() {
+        assert_eq!(
+            Program::new(vec![vec![Token::Expression(Expression {
+                opcode: "mov".to_string(),
+                lhs: SideType::Normal("ra".to_string()),
+                rhs: SideType::Offset(ExpressionOffset {
+                    lhs: "rb".to_string(),
+                    operator: Some("+".to_string()),
+                    rhs: Some("1".to_string()),
+                }),
+            })],]),
+            Program {
+                instructions: vec![Instruction::new(
+                    Opcode::Mov,
+                    Operand::Register(Register::Ra),
+                    Operand::Offset(Offset {
+                        lhs_operand: "rb".to_string(),
+                        operator: Some("+".to_string()),
+                        rhs_operand: Some("1".to_string()),
+                    })
+                ),],
+                labels: Labels::new(),
+            }
+        );
+
+        assert_eq!(
+            Program::new(vec![vec![Token::Expression(Expression {
+                opcode: "mov".to_string(),
+                lhs: SideType::Normal("ra".to_string()),
+                rhs: SideType::Offset(ExpressionOffset {
+                    lhs: "rb".to_string(),
+                    operator: None,
+                    rhs: None,
+                }),
+            })],]),
+            Program {
+                instructions: vec![Instruction::new(
+                    Opcode::Mov,
+                    Operand::Register(Register::Ra),
+                    Operand::Offset(Offset {
+                        lhs_operand: "rb".to_string(),
+                        operator: None,
+                        rhs_operand: None,
+                    })
+                ),],
+                labels: Labels::new(),
+            }
+        );
     }
 }
