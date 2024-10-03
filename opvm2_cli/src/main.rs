@@ -18,6 +18,8 @@ struct Args {
     interpret: bool,
     #[arg(short, long)]
     plugin: Vec<String>,
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 fn compress(input: Vec<u8>, output_file: String) -> Result<(), String> {
@@ -28,11 +30,16 @@ fn compress(input: Vec<u8>, output_file: String) -> Result<(), String> {
     Ok(())
 }
 
-fn run_interpreter(vm: &mut Vm, path: String, plugins: Vec<Vec<u8>>) -> Result<(), String> {
+fn run_interpreter(
+    vm: &mut Vm,
+    path: String,
+    plugins: Vec<Vec<u8>>,
+    verbose: bool,
+) -> Result<(), String> {
     let file_content = std::fs::read_to_string(path).unwrap();
     let program = Program::from(file_content.as_str());
     // load all plugins
-    vm.plugin.load_all(plugins)?;
+    vm.plugin.load_all(plugins, verbose)?;
     vm.run(program)?;
     Ok(())
 }
@@ -46,24 +53,24 @@ fn load_plugins(plugins: Vec<String>) -> Result<Vec<Vec<u8>>, String> {
     Ok(loaded)
 }
 
-fn run_compiled_program(vm: &mut Vm, path: String) -> Result<(), String> {
+fn run_compiled_program(vm: &mut Vm, path: String, verbose: bool) -> Result<(), String> {
     let input_file = File::open(&path).map_err(|e| e.to_string())?;
     let mut decoder = Decoder::new(input_file).map_err(|e| e.to_string())?;
     let mut buffer: Vec<u8> = Vec::new();
     std::io::copy(&mut decoder, &mut buffer).map_err(|e| e.to_string())?;
     let compiled = CompiledProgram::from_compiled(buffer);
     // load any plugins
-    vm.plugin.load_all(compiled.plugins)?;
+    vm.plugin.load_all(compiled.plugins, verbose)?;
     vm.run(compiled.program).unwrap();
     Ok(())
 }
 
-fn compile(path: String, plugins: Vec<Vec<u8>>) -> Result<(), String> {
+fn compile(path: String, plugins: Vec<Vec<u8>>, verbose: bool) -> Result<(), String> {
     let file_content = std::fs::read_to_string(&path).unwrap();
     let program = Program::from(file_content.as_str());
     let to_compile = CompiledProgram::new(program, plugins);
 
-    let compiled = to_compile.compile()?;
+    let compiled = to_compile.compile(verbose)?;
 
     compress(
         compiled,
@@ -81,27 +88,32 @@ fn main() -> Result<(), String> {
 
     if args.debug {
         vm.plugin
-            .load_from_path("target/wasm32-unknown-unknown/debug/debugger.wasm")
+            .load_from_path(
+                "target/wasm32-unknown-unknown/debug/debugger.wasm",
+                args.verbose,
+            )
             .unwrap();
     }
 
     let plugins = load_plugins(args.plugin)?;
 
     if args.interpret {
-        run_interpreter(&mut vm, args.file, plugins)?;
+        run_interpreter(&mut vm, args.file, plugins, args.verbose)?;
         return Ok(());
     }
 
     if args.compile {
         let now = Instant::now();
-        compile(args.file, plugins)?;
+        compile(args.file, plugins, args.verbose)?;
         let end = now.elapsed();
 
-        println!("Compiled in {} ms", end.as_millis());
+        if args.verbose {
+            println!("Compiled in {} ms", end.as_millis());
+        }
         return Ok(());
     }
 
-    run_compiled_program(&mut vm, args.file)?;
+    run_compiled_program(&mut vm, args.file, args.verbose)?;
 
     Ok(())
 }

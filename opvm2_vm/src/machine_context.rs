@@ -2,6 +2,8 @@ use extism::{convert::Json, *};
 use opvm2::{parser::program::Program, register::Registers, stack::Stack};
 use serde::Deserialize;
 
+use crate::memory::Memory;
+
 #[derive(Debug, Deserialize, Clone, PartialEq, FromBytes)]
 #[encoding(Json)]
 pub struct MachineContext {
@@ -11,7 +13,7 @@ pub struct MachineContext {
     pub stack: Stack<u64>,
     pub call_stack: Stack<u64>,
     pub current_program: Program,
-    // todo: memory?
+    pub memory: Memory,
 }
 
 impl MachineContext {

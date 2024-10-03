@@ -12,7 +12,7 @@ use crate::{
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
 #[encoding(Json)]
 pub enum LabelValue {
-    Address(u64),
+    Address(u32),
     Literal(String),
 }
 
@@ -41,8 +41,10 @@ impl From<Vec<(String, LabelValue)>> for Labels {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct Program {
-    pub instructions: Vec<Instruction>,
-    pub labels: Labels,
+    // just a list of bytecode? where does this go? what goes first?
+    pub instructions: Vec<Instruction>, // instead of parsing from tokens -> instructions, we go from tokens -> bytecode
+    pub bytecode: Vec<u8>,
+    pub labels: Labels, // labels will just have the address offset stored, need to figure out how to load these in.
 }
 
 impl Program {
@@ -63,6 +65,7 @@ impl Program {
     }
 
     fn tokens_to_program(tokens: Vec<Vec<Token>>) -> Result<Self, String> {
+        // make an instruction, then convert said instruction into bytecode.
         let mut instructions = Vec::new();
         let mut labels: Labels = Labels {
             list: Default::default(),
@@ -75,15 +78,16 @@ impl Program {
                         // mark the location at which the label is located at, use instructions.len()
                         labels
                             .list
-                            .insert(l, LabelValue::Address(instructions.len() as u64));
+                            .insert(l, LabelValue::Address(instructions.len() as u32));
                     }
                     Token::LabelWithLiteral(l) => {
                         // see if we can parse the l.value as a number
-                        if let Ok(val) = l.value.parse::<u64>() {
+                        if let Ok(val) = l.value.parse::<u32>() {
                             labels.list.insert(l.name, LabelValue::Address(val));
                             continue;
                         }
 
+                        // todo, get rid of this "literal" space and make it an address always after mapping.
                         labels.list.insert(l.name, LabelValue::Literal(l.value));
                     }
                     Token::Directive(_) => todo!(),
@@ -92,7 +96,7 @@ impl Program {
                         let rhs = Self::parse_side_type(e.rhs)?;
                         let instruction = Instruction::new(e.opcode.into(), lhs, rhs);
                         instructions.push(instruction);
-                    }
+                    } // will require multiple passes if the labels are not defined in order (above the expression it's used in.)
                     _ => (),
                 }
             }
@@ -100,6 +104,7 @@ impl Program {
         Ok(Program {
             instructions,
             labels,
+            bytecode: Vec::new(),
         })
     }
 
@@ -119,6 +124,7 @@ impl Program {
         Program {
             instructions: vec![],
             labels: Labels::new(),
+            bytecode: Vec::new(),
         }
     }
 }
@@ -161,6 +167,7 @@ mod test {
                     ),
                 ],
                 labels: Labels::new(),
+                bytecode: Vec::new(),
             }
         )
     }
@@ -198,7 +205,8 @@ mod test {
                 labels: Labels::from(vec![
                     ("start".to_string(), LabelValue::Address(0)),
                     ("end".to_string(), LabelValue::Address(2))
-                ])
+                ]),
+                bytecode: Vec::new(),
             }
         )
     }
@@ -247,7 +255,8 @@ mod test {
                         LabelValue::Literal("this is my custom value".to_string())
                     ),
                     ("end".to_string(), LabelValue::Address(2))
-                ])
+                ]),
+                bytecode: Vec::new(),
             }
         )
     }
@@ -274,6 +283,7 @@ mod test {
                         rhs_operand: Some("1".to_string()),
                     })
                 ),],
+                bytecode: Vec::new(),
                 labels: Labels::new(),
             }
         );
@@ -298,6 +308,7 @@ mod test {
                         rhs_operand: None,
                     })
                 ),],
+                bytecode: Vec::new(),
                 labels: Labels::new(),
             }
         );

@@ -1,5 +1,6 @@
-pub mod heap;
+//pub mod heap;
 pub mod machine_context;
+pub mod memory;
 pub mod plugin;
 pub mod vm;
 
@@ -21,11 +22,11 @@ impl CompiledProgram {
         Self { program, plugins }
     }
 
-    pub fn compile(&self) -> Result<Vec<u8>, String> {
+    pub fn compile(&self, verbose: bool) -> Result<Vec<u8>, String> {
         // todo: find out if we have all the plugins we need before we compile.
         // load each plugin in the plugin loader
         let mut loader = PluginLoader::new(UserData::new(MachineContext::new()));
-        loader.load_all(self.plugins.clone())?;
+        loader.load_all(self.plugins.clone(), verbose)?;
         let mut err_msg = String::new();
         for ins in self.program.instructions.iter() {
             match ins.opcode {

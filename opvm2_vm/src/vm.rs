@@ -1,19 +1,18 @@
-use std::sync::MutexGuard;
+use std::{collections::BTreeMap, sync::MutexGuard};
 
 use extism::UserData;
 use opvm2::{parser::program::LabelValue, plugin_interface::OnInstructionValue};
 
 use crate::{
-    machine_context::MachineContext, opcode::Opcode, operand::Operand, parser::program::Program,
-    plugin::PluginLoader,
+    machine_context::MachineContext, memory::Memory, opcode::Opcode, operand::Operand,
+    parser::program::Program, plugin::PluginLoader,
 };
 
 #[derive(Debug)]
 pub struct Vm {
-    // todo: this stuff should live in a machine context? that plugins have access to? then the VM should also have access to
-    // at the same level as the plugin
     pub context: UserData<MachineContext>,
     pub plugin: PluginLoader,
+    pub memory: Memory,
 }
 
 impl Vm {
@@ -23,6 +22,7 @@ impl Vm {
         Vm {
             context: context.clone(),
             plugin: PluginLoader::new(context),
+            memory: Memory::new(),
         }
     }
 
@@ -32,6 +32,7 @@ impl Vm {
         Vm {
             context: context.clone(),
             plugin: PluginLoader::new(context),
+            memory: Memory::new(),
         }
     }
 
@@ -48,6 +49,11 @@ impl Vm {
             let mut context = context.lock().unwrap();
             context.current_program = program.clone();
         }
+
+        self.remap();
+        // todo: map all literals to memory space using allocator?
+        // todo: actually, map entire program into memory using allocator.
+        // todo: write remapper.
         'outer: while (self.check_pc() as usize) < program.instructions.len() {
             let pc = self.check_pc();
             let item = &program.instructions[pc as usize];
@@ -215,6 +221,33 @@ impl Vm {
         Ok(())
     }
 
+    fn remap(&mut self) {
+        // loop through program, get all literals/instructions, remap into existing memory space.
+        let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+        let mut context = context.lock().unwrap();
+
+        let mut literal_list: BTreeMap<String, u32> = BTreeMap::new();
+        for (label, value) in context.current_program.labels.list.iter() {
+            match value {
+                LabelValue::Literal(value) => {
+                    // store in memory.
+                    let address = self.memory.push(value.as_bytes());
+                    literal_list.insert(label.clone(), address);
+                }
+                LabelValue::Address(address) => {
+                    // these addresses need to be relocated to the new memory space. address * 128.
+                }
+            }
+        }
+
+        // labels, store in memory, store pointer in hashmap.
+
+        // at this point we should get all the current labels and literals and put them into memory, then we can remap the instructions.
+        for instruction in context.current_program.instructions.iter() {
+            println!("{:X}", instruction.encode(&literal_list));
+        }
+    }
+
     fn test(&mut self, context: &mut MutexGuard<MachineContext>, lhs: &Operand, rhs: &Operand) {
         let lhs_value = self.get_value(context, lhs);
         let rhs_value = self.get_value(context, rhs);
@@ -312,6 +345,7 @@ mod test {
         vm.run(Program {
             instructions: input,
             labels: Labels::new(),
+            bytecode: Vec::new(),
         })?;
         Ok(vm)
     }
@@ -321,6 +355,7 @@ mod test {
         vm.run(Program {
             instructions: input,
             labels: Labels::from(labels),
+            bytecode: Vec::new(),
         })?;
         Ok(vm)
     }
@@ -655,7 +690,7 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Je, Operand::Label("end".to_string())),
+            Instruction::new_l(Opcode::Je, Operand::Label("end".to_string())), // todo: instead of passing literal, pass address where the label goes.
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -918,6 +953,35 @@ mod test {
         run_l(input, labels)?;
         let end = start.elapsed();
         assert!(end.as_millis() > 100);
+        Ok(())
+    }
+
+    #[test]
+    fn can_remap_instructions() -> Result<(), String> {
+        let instructions = vec![
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Ra),
+                Operand::Number(10),
+            ),
+            Instruction::new(
+                Opcode::Add,
+                Operand::Register(Register::R1),
+                Operand::Number(20),
+            ),
+            Instruction::new(
+                Opcode::Mov,
+                Operand::Register(Register::Rc),
+                Operand::Number(30),
+            ),
+        ];
+        let labels = vec![("end".to_string(), LabelValue::Address(3))];
+        let mut vm = run_l(instructions, labels)?;
+
+        vm.remap();
+
+        assert!(1 == 0);
+
         Ok(())
     }
 }

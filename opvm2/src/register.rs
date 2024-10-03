@@ -21,6 +21,50 @@ pub enum Register {
     R8,
     R9,
 }
+impl Register {
+    pub fn encode(&self) -> u32 {
+        match self {
+            Self::Ra => 0,
+            Self::Rb => 1,
+            Self::Rc => 2,
+            Self::Rd => 3,
+            Self::Re => 4,
+            Self::Rf => 5,
+            Self::R0 => 6,
+            Self::R1 => 7,
+            Self::R2 => 8,
+            Self::R3 => 9,
+            Self::R4 => 10,
+            Self::R5 => 11,
+            Self::R6 => 12,
+            Self::R7 => 13,
+            Self::R8 => 14,
+            Self::R9 => 15,
+        }
+    }
+
+    pub fn decode(value: u32) -> Register {
+        match value {
+            0 => Self::Ra,
+            1 => Self::Rb,
+            2 => Self::Rc,
+            3 => Self::Rd,
+            4 => Self::Re,
+            5 => Self::Rf,
+            6 => Self::R0,
+            7 => Self::R1,
+            8 => Self::R2,
+            9 => Self::R3,
+            10 => Self::R4,
+            11 => Self::R5,
+            12 => Self::R6,
+            13 => Self::R7,
+            14 => Self::R8,
+            15 => Self::R9,
+            _ => panic!("Bad register format! {:X}", value),
+        }
+    }
+}
 
 macro_rules! flag_register {
     ($e:expr,bool) => {

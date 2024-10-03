@@ -40,6 +40,91 @@ pub enum Opcode {
     Plugin(String),
 }
 
+impl Opcode {
+    pub fn is_plugin(&self) -> bool {
+        match &self {
+            Self::Plugin(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_plugin_opcode(&self) -> String {
+        match &self {
+            Self::Plugin(name) => name.clone(),
+            _ => String::new(),
+        }
+    }
+
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            Self::Mov => 0,
+            Self::Add => 1,
+            Self::Sub => 2,
+            Self::Mul => 3,
+            Self::Div => 4,
+            Self::Mod => 5,
+            Self::Xor => 6,
+            Self::Inc => 7,
+            Self::Dec => 8,
+            Self::Push => 9,
+            Self::Pop => 10,
+            Self::Dup => 11,
+            Self::Test => 12,
+            Self::Jmp => 13,
+            Self::Je => 14,
+            Self::Jne => 15,
+            Self::Jle => 16,
+            Self::Jge => 17,
+            Self::Jl => 18,
+            Self::Jg => 19,
+            Self::Call => 20,
+            Self::Return => 21,
+            Self::Assert => 22,
+            Self::Print => 23,
+            Self::Sleep => 24,
+            Self::Nop => 25,
+            Self::Halt => 26,
+            _ => 25, // anything else is nop rn
+                     //Self::Plugin(_) => 27, again, going to have to do something about this.
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Opcode {
+        match value {
+            0 => Opcode::Mov,
+            1 => Opcode::Add,
+            2 => Opcode::Sub,
+            3 => Opcode::Mul,
+            4 => Opcode::Div,
+            5 => Opcode::Mod,
+            6 => Opcode::Xor,
+            7 => Opcode::Inc,
+            8 => Opcode::Dec,
+            9 => Opcode::Push,
+            10 => Opcode::Pop,
+            11 => Opcode::Dup,
+            12 => Opcode::Test,
+            13 => Opcode::Jmp,
+            14 => Opcode::Je,
+            15 => Opcode::Jne,
+            16 => Opcode::Jle,
+            17 => Opcode::Jge,
+            18 => Opcode::Jl,
+            19 => Opcode::Jg,
+            20 => Opcode::Call,
+            21 => Opcode::Return,
+            22 => Opcode::Assert,
+            23 => Opcode::Print,
+            24 => Opcode::Sleep,
+            25 => Opcode::Nop,
+            26 => Opcode::Halt,
+            _ => Opcode::Nop,
+            //27 => Self::Plugin(str), // todo: this can't exist in the current state because the plugin will need to have a string passed.
+            // idea: in the future, probably map the plugin to a literal and pass it as part of the opcode, idk how yet.
+        }
+    }
+}
+
 impl From<String> for Opcode {
     fn from(value: String) -> Self {
         match value.to_lowercase().as_str() {

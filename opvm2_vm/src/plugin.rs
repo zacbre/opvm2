@@ -67,21 +67,21 @@ impl PluginLoader {
         Ok(executed_count)
     }
 
-    pub fn load_all(&mut self, plugins: Vec<Vec<u8>>) -> Result<(), String> {
+    pub fn load_all(&mut self, plugins: Vec<Vec<u8>>, verbose: bool) -> Result<(), String> {
         for plugin in plugins {
             let manifest = Manifest::new([Wasm::data(plugin)]);
-            self.load(manifest);
+            self.load(manifest, verbose);
         }
         Ok(())
     }
 
-    pub fn load_from_path(&mut self, path: &str) -> Result<(), String> {
+    pub fn load_from_path(&mut self, path: &str, verbose: bool) -> Result<(), String> {
         let manifest = Manifest::new([Wasm::file(path)]);
-        self.load(manifest);
+        self.load(manifest, verbose);
         Ok(())
     }
 
-    pub fn load(&mut self, manifest: Manifest) {
+    pub fn load(&mut self, manifest: Manifest, verbose: bool) {
         let mut plugin = PluginBuilder::new(manifest)
             .with_wasi(true)
             .with_function(
@@ -124,7 +124,9 @@ impl PluginLoader {
             panic!("Plugin does not have a `name` function");
         }
         let name = plugin.call::<(), String>("name", ()).unwrap();
-        println!("Loaded plugin: {}", name);
+        if verbose {
+            println!("Loaded plugin: {}", name);
+        }
         self.plugins.push(plugin);
     }
 }
@@ -219,7 +221,10 @@ mod test {
         let context = super::MachineContext::new();
         let mut vm = crate::vm::Vm::new(context);
         vm.plugin
-            .load_from_path("../target/wasm32-unknown-unknown/debug/plugin_test.wasm")
+            .load_from_path(
+                "../target/wasm32-unknown-unknown/debug/plugin_test.wasm",
+                true,
+            )
             .unwrap();
         vm
     }
@@ -242,8 +247,10 @@ mod test {
         ",
         );
         vm.run(program).unwrap();
-        vm.plugin
-            .load_from_path("../target/wasm32-unknown-unknown/debug/plugin_test.wasm")?;
+        vm.plugin.load_from_path(
+            "../target/wasm32-unknown-unknown/debug/plugin_test.wasm",
+            true,
+        )?;
         let result = vm.plugin.plugins[0].call::<Register, u64>("get_register_test", Register::Ra);
         assert_eq!(result.unwrap(), 5);
         let result = vm.plugin.plugins[0].call::<Register, u64>("get_register_test", Register::Rb);
