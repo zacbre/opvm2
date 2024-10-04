@@ -1,6 +1,5 @@
 use extism_pdk::*;
 use opvm2::{
-    parser::program::Labels,
     plugin_interface::*,
     register::{Register, Registers},
 };
@@ -64,7 +63,7 @@ pub fn handle_life(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>>
 
 #[plugin_fn]
 pub fn handle_print_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
-    // convert u64 to ascii
+    // convert usize to ascii
     // check if it's a number or a register
     if let Ok(value) = ins.lhs.get_number() {
         unsafe {
@@ -82,5 +81,17 @@ pub fn handle_print_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
             print((value as u8 as char).into())?;
         }
     };
+    Ok(None)
+}
+
+#[plugin_fn]
+pub fn handle_len(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
+    let register = ins
+        .lhs
+        .get_register()
+        .map_err(|e| extism_pdk::Error::msg(e.to_string()))?;
+    let value = unsafe { get_register(register)? };
+    let len = value.to_string().len() as u64;
+    unsafe { set_register(Register::Ra, len)? }
     Ok(None)
 }

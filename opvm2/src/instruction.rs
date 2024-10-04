@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use extism_pdk::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
 
-use crate::{opcode::Opcode, operand::Operand};
+use crate::{
+    opcode::{Opcode, PluginValue},
+    operand::Operand,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
@@ -54,7 +57,7 @@ impl Instruction {
     // actually, maybe we can just pass in a literal "map" that shows where each one was mapped to? and have that map
     // just be label offset => address, so we can resolve them here.
     // idk if i like this literal map, because we only get passed the label...we need a way to store these addresses in memory at this point?
-    pub fn encode(&self, literal_map: &BTreeMap<String, u32>) -> u128 {
+    pub fn encode(&self, literal_map: &BTreeMap<String, usize>) -> u128 {
         let mut instruction = 0u128;
         instruction |= (self.opcode.to_u8() as u128) << 122;
         instruction |= (self.operand_count() as u128) << 120;
@@ -64,36 +67,45 @@ impl Instruction {
         instruction |= (self.rhs.encode(literal_map) as u128) << 52;
         // last 32 bits is for opcode custom name.
         if self.opcode.is_plugin() {
-            // todo, locate this string in memory map for literal?
-            //instruction |= (self.opcode.get_plugin_opcode() as u128) << 20;
+            // we should maybe insert this label into memory to use it there?
+            instruction |= (self.opcode.get_plugin_address(literal_map) as u128) << 20;
         }
 
         // try to reconstruct:
-        println!("Opcode: {}", instruction >> 122);
-        println!("Operand Count: {}", (instruction >> 120) & 0b11);
-        println!("LHS Type: {}", (instruction >> 118) & 0b11);
-        println!("LHS: {}", (instruction >> 86) & 0xFFFFFFFF);
-        println!("RHS Type: {}", (instruction >> 84) & 0b11);
-        println!("RHS: {}", (instruction >> 52) & 0xFFFFFFFF);
-        // reconstruct the instruction
-        println!("{:?}", Self::decode(instruction));
+        // println!("Opcode: {}", instruction >> 122);
+        // println!("Operand Count: {}", (instruction >> 120) & 0b11);
+        // println!("LHS Type: {}", (instruction >> 118) & 0b11);
+        // println!("LHS: {}", (instruction >> 86) & 0xFFFFFFFF);
+        // println!("RHS Type: {}", (instruction >> 84) & 0b11);
+        // println!("RHS: {}", (instruction >> 52) & 0xFFFFFFFF);
+        // // reconstruct the instruction
+        // println!("{:?}", Self::decode(instruction));
         instruction
     }
 
-    fn decode(instruction: u128) -> Instruction {
-        let opcode = Opcode::from_u8((instruction >> 122) as u8);
+    pub fn decode(instruction: u128) -> Instruction {
+        let mut opcode = Opcode::from_u8((instruction >> 122) as u8);
+        if opcode.is_plugin() {
+            opcode = Opcode::Plugin(PluginValue::Address(
+                ((instruction >> 20) & 0xFFFFFFFF) as u32,
+            ));
+        }
+
         let operand_count = (instruction >> 120) & 0b11;
         match operand_count {
             1 => {
                 let lhs_type = (instruction >> 118) & 0b11;
-                let lhs = Operand::decode(lhs_type as u8, (instruction >> 86) as u32);
+                let lhs =
+                    Operand::decode(lhs_type as u8, ((instruction >> 86) & 0xFFFFFFFF) as u32);
                 Instruction::new_l(opcode, lhs)
             }
             2 => {
                 let lhs_type = (instruction >> 118) & 0b11;
-                let lhs = Operand::decode(lhs_type as u8, (instruction >> 86) as u32);
+                let lhs =
+                    Operand::decode(lhs_type as u8, ((instruction >> 86) & 0xFFFFFFFF) as u32);
                 let rhs_type = (instruction >> 84) & 0b11;
-                let rhs = Operand::decode(rhs_type as u8, (instruction >> 52) as u32);
+                let rhs =
+                    Operand::decode(rhs_type as u8, ((instruction >> 52) & 0xFFFFFFFF) as u32);
                 Instruction::new(opcode, lhs, rhs)
             }
             _ => Instruction::new_e(opcode),

@@ -1,19 +1,24 @@
 use extism::{convert::Json, *};
-use opvm2::{parser::program::Program, register::Registers, stack::Stack};
-use serde::Deserialize;
+use opvm2::{register::Registers, stack::Stack};
+use serde::{Deserialize, Serialize};
 
 use crate::memory::Memory;
 
-#[derive(Debug, Deserialize, Clone, PartialEq, FromBytes)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct MachineContext {
-    // todo: this stuff should live in a machine context? that plugins have access to? then the VM should also have access to
-    // at the same level as the plugin
+    pub base_address: usize,
     pub registers: Registers,
-    pub stack: Stack<u64>,
-    pub call_stack: Stack<u64>,
-    pub current_program: Program,
+    pub stack: Stack<usize>,
+    pub call_stack: Stack<usize>,
     pub memory: Memory,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, ToBytes, FromBytes)]
+#[encoding(Json)]
+pub struct Label {
+    pub name: String,
+    pub address: usize,
 }
 
 impl MachineContext {
@@ -22,7 +27,8 @@ impl MachineContext {
             registers: Registers::new(),
             stack: Stack::new(),
             call_stack: Stack::new(),
-            current_program: Program::empty(),
+            memory: Memory::new(),
+            base_address: 0,
         }
     }
 }

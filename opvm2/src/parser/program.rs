@@ -12,7 +12,7 @@ use crate::{
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
 #[encoding(Json)]
 pub enum LabelValue {
-    Address(u32),
+    Address(usize),
     Literal(String),
 }
 
@@ -41,10 +41,9 @@ impl From<Vec<(String, LabelValue)>> for Labels {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct Program {
-    // just a list of bytecode? where does this go? what goes first?
-    pub instructions: Vec<Instruction>, // instead of parsing from tokens -> instructions, we go from tokens -> bytecode
-    pub bytecode: Vec<u8>,
-    pub labels: Labels, // labels will just have the address offset stored, need to figure out how to load these in.
+    pub instructions: Vec<Instruction>,
+    pub labels: Labels,
+    pub plugins: Vec<Vec<u8>>,
 }
 
 impl Program {
@@ -78,11 +77,11 @@ impl Program {
                         // mark the location at which the label is located at, use instructions.len()
                         labels
                             .list
-                            .insert(l, LabelValue::Address(instructions.len() as u32));
+                            .insert(l, LabelValue::Address(instructions.len()));
                     }
                     Token::LabelWithLiteral(l) => {
                         // see if we can parse the l.value as a number
-                        if let Ok(val) = l.value.parse::<u32>() {
+                        if let Ok(val) = l.value.parse::<usize>() {
                             labels.list.insert(l.name, LabelValue::Address(val));
                             continue;
                         }
@@ -104,7 +103,7 @@ impl Program {
         Ok(Program {
             instructions,
             labels,
-            bytecode: Vec::new(),
+            plugins: vec![],
         })
     }
 
@@ -124,7 +123,7 @@ impl Program {
         Program {
             instructions: vec![],
             labels: Labels::new(),
-            bytecode: Vec::new(),
+            plugins: vec![],
         }
     }
 }
@@ -167,7 +166,7 @@ mod test {
                     ),
                 ],
                 labels: Labels::new(),
-                bytecode: Vec::new(),
+                plugins: vec![]
             }
         )
     }
@@ -206,7 +205,7 @@ mod test {
                     ("start".to_string(), LabelValue::Address(0)),
                     ("end".to_string(), LabelValue::Address(2))
                 ]),
-                bytecode: Vec::new(),
+                plugins: vec![]
             }
         )
     }
@@ -256,7 +255,7 @@ mod test {
                     ),
                     ("end".to_string(), LabelValue::Address(2))
                 ]),
-                bytecode: Vec::new(),
+                plugins: vec![]
             }
         )
     }
@@ -283,8 +282,8 @@ mod test {
                         rhs_operand: Some("1".to_string()),
                     })
                 ),],
-                bytecode: Vec::new(),
                 labels: Labels::new(),
+                plugins: vec![]
             }
         );
 
@@ -308,8 +307,8 @@ mod test {
                         rhs_operand: None,
                     })
                 ),],
-                bytecode: Vec::new(),
                 labels: Labels::new(),
+                plugins: vec![]
             }
         );
     }

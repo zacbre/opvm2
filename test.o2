@@ -1,5 +1,9 @@
-end: 'this is a test'
-loop: add ra, end
-      print ra
-      test ra, 10
-      jl loop
+label1: 'testing 1234'
+mov r0, 64
+jmp r0
+mov r1, 10
+mov r2, 20
+mov r3, 30
+jmp end
+end:
+mov r4, 40

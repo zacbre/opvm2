@@ -1,18 +1,21 @@
 use std::{collections::BTreeMap, sync::MutexGuard};
 
 use extism::UserData;
-use opvm2::{parser::program::LabelValue, plugin_interface::OnInstructionValue};
+use opvm2::{
+    instruction::Instruction,
+    parser::program::{LabelValue, Program},
+    plugin_interface::OnInstructionValue,
+};
 
 use crate::{
     machine_context::MachineContext, memory::Memory, opcode::Opcode, operand::Operand,
-    parser::program::Program, plugin::PluginLoader,
+    plugin::PluginLoader, CompiledProgram,
 };
 
 #[derive(Debug)]
 pub struct Vm {
     pub context: UserData<MachineContext>,
     pub plugin: PluginLoader,
-    pub memory: Memory,
 }
 
 impl Vm {
@@ -22,7 +25,6 @@ impl Vm {
         Vm {
             context: context.clone(),
             plugin: PluginLoader::new(context),
-            memory: Memory::new(),
         }
     }
 
@@ -32,43 +34,78 @@ impl Vm {
         Vm {
             context: context.clone(),
             plugin: PluginLoader::new(context),
-            memory: Memory::new(),
         }
     }
 
-    pub fn check_pc(&self) -> u64 {
+    pub fn check_pc(&self) -> usize {
         let context = self.context.get().map_err(|e| e.to_string()).unwrap();
         let context = context.lock().unwrap();
         *context.registers.clone().check_pc()
     }
 
-    pub fn run(&mut self, program: Program) -> Result<(), String> {
-        // every time we need access to the context, we need to unlock it.
+    pub fn check_address(&self) -> usize {
+        let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+        let context = context.lock().unwrap();
+        context.memory.address()
+    }
+
+    pub fn get_instruction(&self) -> Instruction {
+        let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+        let mut context = context.lock().unwrap();
+        let pc = *context.registers.check_pc();
+        let pre_decoded = context.memory.get_instruction(pc);
+        Instruction::decode(pre_decoded)
+    }
+
+    pub fn run_program(&mut self, program: Program) -> Result<(), String> {
+        let program = CompiledProgram::from(program);
+        self.run(program)
+    }
+
+    pub fn run(&mut self, program: CompiledProgram) -> Result<(), String> {
+        let start_address = program.start_address;
+        self.plugin.load_all(&program.plugins, false)?;
+
         {
             let context = self.context.get().map_err(|e| e.to_string()).unwrap();
             let mut context = context.lock().unwrap();
-            context.current_program = program.clone();
+            context.registers.set_pc(start_address);
+            context.memory = Memory::from_raw(program.program, program.memory_address);
+            context.base_address = start_address;
         }
 
-        self.remap();
-        // todo: map all literals to memory space using allocator?
-        // todo: actually, map entire program into memory using allocator.
-        // todo: write remapper.
-        'outer: while (self.check_pc() as usize) < program.instructions.len() {
+        'outer: while (self.check_pc() as usize) < self.check_address() {
             let pc = self.check_pc();
-            let item = &program.instructions[pc as usize];
+            let item = self.get_instruction();
             let ins = OnInstructionValue {
                 opcode: item.opcode.clone(),
                 lhs: item.lhs.clone(),
                 rhs: item.rhs.clone(),
                 pc,
             };
-            self.plugin
-                .execute_plugin_fn("handle_instruction".to_string(), ins.clone(), true)?;
+            self.plugin.execute_plugin_fn(
+                "handle_instruction".to_string(),
+                ins.clone(),
+                true,
+                start_address,
+            )?;
+            // get plugin name from memory.
+            let plugin_name = match ins.opcode {
+                Opcode::Plugin(opvm2::opcode::PluginValue::Address(address)) => {
+                    let context = self.context.get().map_err(|e| e.to_string()).unwrap();
+                    let mut context = context.lock().unwrap();
+                    let address = address as usize;
+                    let plugin_name_bytes = context.memory.get_literal(address);
+                    let plugin_name = String::from_utf8(plugin_name_bytes.to_vec()).unwrap();
+                    plugin_name
+                }
+                _ => item.opcode.to_string(),
+            };
             match self.plugin.execute_plugin_fn(
-                format!("handle_{}", &item.opcode.to_string().to_lowercase()),
+                format!("handle_{}", &plugin_name.to_lowercase()),
                 ins.clone(),
                 false,
+                start_address,
             ) {
                 Ok(count) => {
                     if count > 0 {
@@ -136,18 +173,24 @@ impl Vm {
                 }
                 Opcode::Test => self.test(&mut context, &item.lhs, &item.rhs),
                 Opcode::Jmp => {
-                    context.registers.set_pc(lhs.expect("lhs is none"));
+                    context
+                        .registers
+                        .set_pc(start_address + lhs.expect("lhs is none"));
                     continue;
                 }
                 Opcode::Je => {
                     if context.registers.check_equals_flag() {
-                        context.registers.set_pc(lhs.expect("lhs is none"));
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jne => {
                     if !context.registers.check_equals_flag() {
-                        context.registers.set_pc(lhs.expect("lhs is none"));
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
                         continue;
                     }
                 }
@@ -155,7 +198,9 @@ impl Vm {
                     if context.registers.check_equals_flag()
                         || context.registers.check_less_than_flag()
                     {
-                        context.registers.set_pc(lhs.expect("lhs is none"));
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
                         continue;
                     }
                 }
@@ -163,26 +208,34 @@ impl Vm {
                     if context.registers.check_equals_flag()
                         || context.registers.check_greater_than_flag()
                     {
-                        context.registers.set_pc(lhs.expect("lhs is none"));
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jl => {
                     if context.registers.check_less_than_flag() {
-                        context.registers.set_pc(lhs.expect("lhs is none"));
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Jg => {
                     if context.registers.check_greater_than_flag() {
-                        context.registers.set_pc(lhs.expect("lhs is none"));
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
                         continue;
                     }
                 }
                 Opcode::Call => {
-                    let call_stack_pointer = context.registers.check_pc() + 1;
+                    let call_stack_pointer = context.registers.check_pc() + 16;
                     context.call_stack.push(call_stack_pointer);
-                    context.registers.set_pc(lhs.expect("lhs is none"));
+                    context
+                        .registers
+                        .set_pc(start_address + lhs.expect("lhs is none"));
                     continue;
                 }
                 Opcode::Return => {
@@ -221,33 +274,6 @@ impl Vm {
         Ok(())
     }
 
-    fn remap(&mut self) {
-        // loop through program, get all literals/instructions, remap into existing memory space.
-        let context = self.context.get().map_err(|e| e.to_string()).unwrap();
-        let mut context = context.lock().unwrap();
-
-        let mut literal_list: BTreeMap<String, u32> = BTreeMap::new();
-        for (label, value) in context.current_program.labels.list.iter() {
-            match value {
-                LabelValue::Literal(value) => {
-                    // store in memory.
-                    let address = self.memory.push(value.as_bytes());
-                    literal_list.insert(label.clone(), address);
-                }
-                LabelValue::Address(address) => {
-                    // these addresses need to be relocated to the new memory space. address * 128.
-                }
-            }
-        }
-
-        // labels, store in memory, store pointer in hashmap.
-
-        // at this point we should get all the current labels and literals and put them into memory, then we can remap the instructions.
-        for instruction in context.current_program.instructions.iter() {
-            println!("{:X}", instruction.encode(&literal_list));
-        }
-    }
-
     fn test(&mut self, context: &mut MutexGuard<MachineContext>, lhs: &Operand, rhs: &Operand) {
         let lhs_value = self.get_value(context, lhs);
         let rhs_value = self.get_value(context, rhs);
@@ -267,18 +293,14 @@ impl Vm {
         &self,
         context: &mut MutexGuard<MachineContext>,
         operand: &Operand,
-    ) -> Result<Option<u64>, String> {
+    ) -> Result<Option<usize>, String> {
         match operand {
             Operand::Number(n) => Ok(Some(*n)),
             Operand::Register(r) => Ok(Some(context.registers.get(&r))),
-            Operand::Label(l) => {
-                let value = context.current_program.labels.list.get(l).unwrap().clone();
-                match value {
-                    LabelValue::Address(n) => Ok(Some(n)),
-                    // todo: address of label value? not sure how to implement this just yet.
-                    LabelValue::Literal(_l) => Ok(None),
-                }
-            }
+            Operand::Label(l) => match l {
+                LabelValue::Address(n) => Ok(Some(*n as usize)),
+                _ => Err(format!("Label '{:?}' is not an address", l)),
+            },
             // Operand::Offset(o) => {
             // what we want to do here is get the value at the specified offset.
             // if it is just a single lhs then we want to get the address?
@@ -342,21 +364,23 @@ mod test {
 
     fn run(input: Vec<Instruction>) -> Result<Vm, String> {
         let mut vm = super::Vm::new_e();
-        vm.run(Program {
+        let program = Program {
             instructions: input,
             labels: Labels::new(),
-            bytecode: Vec::new(),
-        })?;
+            plugins: vec![],
+        };
+        vm.run_program(program)?;
         Ok(vm)
     }
 
     fn run_l(input: Vec<Instruction>, labels: Vec<(String, LabelValue)>) -> Result<Vm, String> {
         let mut vm = super::Vm::new_e();
-        vm.run(Program {
+        let program = Program {
             instructions: input,
             labels: Labels::from(labels),
-            bytecode: Vec::new(),
-        })?;
+            plugins: vec![],
+        };
+        vm.run_program(program)?;
         Ok(vm)
     }
 
@@ -366,7 +390,7 @@ mod test {
         context.registers.clone()
     }
 
-    fn pop_stack(vm: &mut Vm) -> Result<u64, String> {
+    fn pop_stack(vm: &mut Vm) -> Result<usize, String> {
         let context = vm.context.get().map_err(|e| e.to_string()).unwrap();
         let mut context = context.lock().unwrap();
         context.stack.pop().ok_or("Stack is empty".to_string())
@@ -452,10 +476,10 @@ mod test {
     fn can_use_math_functions(
         opcode: Opcode,
         lhs: &str,
-        lval: u64,
+        lval: usize,
         rhs: &str,
-        rval: u64,
-        expected: u64,
+        rval: usize,
+        expected: usize,
     ) -> Result<(), String> {
         let input = vec![
             Instruction::new(
@@ -493,9 +517,9 @@ mod test {
     fn can_use_math_functions_with_immediate(
         opcode: Opcode,
         lhs: &str,
-        lval: u64,
-        rval: u64,
-        expected: u64,
+        lval: usize,
+        rval: usize,
+        expected: usize,
     ) -> Result<(), String> {
         let input = vec![
             Instruction::new(
@@ -551,7 +575,7 @@ mod test {
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::R0),
-                Operand::Number(4),
+                Operand::Number(64),
             ),
             Instruction::new_l(Opcode::Jmp, Operand::Register(Register::R0)),
             Instruction::new(
@@ -580,7 +604,10 @@ mod test {
     #[test]
     fn can_jump_to_label() {
         let input = vec![
-            Instruction::new_l(Opcode::Jmp, Operand::Label("start".to_string())),
+            Instruction::new_l(
+                Opcode::Jmp,
+                Operand::Label(LabelValue::Literal("start".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Ra),
@@ -622,13 +649,19 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jle, Operand::Label("less".to_string())),
+            Instruction::new_l(
+                Opcode::Jle,
+                Operand::Label(LabelValue::Literal("less".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rd),
                 Operand::Number(1),
             ),
-            Instruction::new_l(Opcode::Jmp, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Jmp,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -649,8 +682,14 @@ mod test {
     #[test]
     fn can_call_and_return() {
         let input = vec![
-            Instruction::new_l(Opcode::Call, Operand::Label("start".to_string())),
-            Instruction::new_l(Opcode::Jmp, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Call,
+                Operand::Label(LabelValue::Literal("start".to_string())),
+            ),
+            Instruction::new_l(
+                Opcode::Jmp,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Ra),
@@ -690,7 +729,10 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Je, Operand::Label("end".to_string())), // todo: instead of passing literal, pass address where the label goes.
+            Instruction::new_l(
+                Opcode::Je,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ), // todo: instead of passing literal, pass address where the label goes.
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -722,7 +764,10 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jne, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Jne,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -754,7 +799,10 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jge, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Jge,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -786,7 +834,10 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jle, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Jle,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -818,7 +869,10 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jg, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Jg,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -850,7 +904,10 @@ mod test {
                 Operand::Register(Register::Ra),
                 Operand::Register(Register::Rb),
             ),
-            Instruction::new_l(Opcode::Jl, Operand::Label("end".to_string())),
+            Instruction::new_l(
+                Opcode::Jl,
+                Operand::Label(LabelValue::Literal("end".to_string())),
+            ),
             Instruction::new(
                 Opcode::Mov,
                 Operand::Register(Register::Rc),
@@ -940,9 +997,9 @@ mod test {
                 Operand::Number(1),
             ),
         ];
-        let labels = vec![("end".to_string(), LabelValue::Address(6))];
+        let labels = vec![("end".to_string(), LabelValue::Address(5))];
         let vm = run_l(input, labels);
-        assert_eq!(vm.unwrap_err(), "Assertion failed at ins 2.".to_string());
+        assert_eq!(vm.unwrap_err(), "Assertion failed at ins 32.".to_string());
     }
 
     #[test]
@@ -953,35 +1010,6 @@ mod test {
         run_l(input, labels)?;
         let end = start.elapsed();
         assert!(end.as_millis() > 100);
-        Ok(())
-    }
-
-    #[test]
-    fn can_remap_instructions() -> Result<(), String> {
-        let instructions = vec![
-            Instruction::new(
-                Opcode::Mov,
-                Operand::Register(Register::Ra),
-                Operand::Number(10),
-            ),
-            Instruction::new(
-                Opcode::Add,
-                Operand::Register(Register::R1),
-                Operand::Number(20),
-            ),
-            Instruction::new(
-                Opcode::Mov,
-                Operand::Register(Register::Rc),
-                Operand::Number(30),
-            ),
-        ];
-        let labels = vec![("end".to_string(), LabelValue::Address(3))];
-        let mut vm = run_l(instructions, labels)?;
-
-        vm.remap();
-
-        assert!(1 == 0);
-
         Ok(())
     }
 }

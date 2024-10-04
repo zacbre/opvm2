@@ -10,7 +10,7 @@ use crate::{parser::program::LabelValue, register::Register};
 pub enum Operand {
     None,               // no operand
     Register(Register), // todo: this can't just be any number mapped, because what if it's just a regular address? need some way to denote "hey this is a register, not an address."
-    Number(u64),
+    Number(usize),
     Label(LabelValue), // todo: this will need to be interpreted as an address at runtime, need to map into memory and store this value later.
     Offset(Offset),    // this will get confusing, maybe split this up
 }
@@ -32,12 +32,12 @@ impl TryFrom<String> for Operand {
             // // perhaps we parse this instead with the parser?
             // let mut parts = value.split("+");
             // let operand = parts.next().unwrap().to_string();
-            // let offset = parts.next().map(|x| x.parse::<u64>().unwrap());
+            // let offset = parts.next().map(|x| x.parse::<usize>().unwrap());
             // return Ok(Operand::Offset(Offset { operand, offset }));
         }
 
         // start trying from.
-        if let Ok(val) = value.parse::<u64>() {
+        if let Ok(val) = value.parse::<usize>() {
             return Ok(Operand::Number(val));
         }
 
@@ -50,7 +50,7 @@ impl TryFrom<String> for Operand {
         }
 
         if value.starts_with("0x") {
-            if let Ok(val) = u64::from_str_radix(value.trim_start_matches("0x"), 16) {
+            if let Ok(val) = usize::from_str_radix(value.trim_start_matches("0x"), 16) {
                 return Ok(Operand::Number(val));
             }
         }
@@ -67,7 +67,7 @@ impl Operand {
         }
     }
 
-    pub fn get_number(&self) -> Result<u64, String> {
+    pub fn get_number(&self) -> Result<usize, String> {
         match self {
             Operand::Number(number) => Ok(*number),
             _ => Err(format!("Number not valid: {:?}", self)),
@@ -77,34 +77,35 @@ impl Operand {
     pub fn operand_type(&self) -> u8 {
         match self {
             Operand::None => 0,
-            Operand::Register(_) => 0,
-            Operand::Number(_) => 1,
-            Operand::Label(_) => 2,
-            Operand::Offset(_) => 3,
+            Operand::Register(_) => 1,
+            Operand::Number(_) => 2,
+            Operand::Label(_) => 3,
+            Operand::Offset(_) => 4,
         }
     }
 
-    pub fn encode(&self, literal_map: &std::collections::BTreeMap<String, u32>) -> u32 {
+    pub fn encode(&self, literal_map: &std::collections::BTreeMap<String, usize>) -> usize {
         match self {
-            Operand::Register(register) => register.encode(),
-            Operand::Number(number) => *number as u32,
+            Operand::Register(register) => register.encode() as usize,
+            Operand::Number(number) => *number as usize,
             Operand::Label(label) => match label {
                 LabelValue::Literal(literal) => {
                     if let Some(res) = literal_map.get(literal) {
                         return *res;
                     }
-                    0u32
+                    0usize
                 }
                 LabelValue::Address(address) => *address,
             },
-            _ => 0u32,
+            _ => 0usize,
         }
     }
 
     pub fn decode(operand_type: u8, operand: u32) -> Operand {
         match operand_type {
-            0 => Operand::Register(Register::decode(operand)),
-            1 => Operand::Number(operand as u64),
+            1 => Operand::Register(Register::decode(operand)),
+            2 => Operand::Number(operand as usize),
+            3 => Operand::Label(LabelValue::Address(operand as usize)),
             _ => Operand::None,
         }
     }

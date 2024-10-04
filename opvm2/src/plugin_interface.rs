@@ -1,7 +1,6 @@
 use crate::{
     opcode::Opcode,
     operand::Operand,
-    parser::program::Labels,
     register::{Register, Registers},
 };
 
@@ -13,8 +12,21 @@ use serde::{Deserialize, Serialize};
 pub struct OnInstructionValue {
     pub lhs: Operand,
     pub rhs: Operand,
-    pub pc: u64,
+    pub pc: usize,
     pub opcode: Opcode,
+}
+
+#[derive(Serialize, Deserialize, ToBytes, FromBytes, Debug, Clone, PartialEq, Eq)]
+#[encoding(Json)]
+pub struct Labels {
+    pub list: Vec<Label>,
+}
+
+#[derive(Serialize, Deserialize, ToBytes, FromBytes, Debug, Clone, PartialEq, Eq)]
+#[encoding(Json)]
+pub struct Label {
+    pub name: String,
+    pub address: usize,
 }
 
 #[host_fn]
@@ -30,5 +42,5 @@ extern "ExtismHost" {
     pub fn quit();
     pub fn print(value: String);
     // todo: add a function to execute instructions within the vm...perhaps we have to patch current_program
-    //pub fn execute_instruction(Json(ins): Json<OnInstructionValue>) -> Option<u64>;
+    //pub fn execute_instruction(Json(ins): Json<OnInstructionValue>) -> Option<usize>;
 }

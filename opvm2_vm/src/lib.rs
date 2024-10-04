@@ -4,31 +4,49 @@ pub mod memory;
 pub mod plugin;
 pub mod vm;
 
+use std::collections::BTreeMap;
+
 use extism::{convert::Json, FromBytes, ToBytes, UserData};
 use machine_context::MachineContext;
+use memory::Memory;
 use opvm2::{opcode::Opcode, parser::program::Program, *};
+use parser::program::LabelValue;
 use plugin::PluginLoader;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, ToBytes, FromBytes, PartialEq, Clone)]
 #[encoding(Json)]
 pub struct CompiledProgram {
-    pub program: Program,
+    pub start_address: usize,
+    pub memory_address: usize,
+    pub program: Vec<u8>,
     pub plugins: Vec<Vec<u8>>,
 }
 
 impl CompiledProgram {
-    pub fn new(program: Program, plugins: Vec<Vec<u8>>) -> Self {
-        Self { program, plugins }
+    pub fn new(plugins: Vec<Vec<u8>>) -> Self {
+        Self {
+            start_address: 0,
+            plugins,
+            program: vec![],
+            memory_address: 0,
+        }
     }
 
-    pub fn compile(&self, verbose: bool) -> Result<Vec<u8>, String> {
-        // todo: find out if we have all the plugins we need before we compile.
-        // load each plugin in the plugin loader
+    pub fn new_e() -> Self {
+        Self {
+            start_address: 0,
+            plugins: vec![],
+            program: vec![],
+            memory_address: 0,
+        }
+    }
+
+    pub fn compile(&mut self, program: Program, verbose: bool) -> Result<Vec<u8>, String> {
         let mut loader = PluginLoader::new(UserData::new(MachineContext::new()));
-        loader.load_all(self.plugins.clone(), verbose)?;
+        loader.load_all(&program.plugins, verbose)?;
         let mut err_msg = String::new();
-        for ins in self.program.instructions.iter() {
+        for ins in program.instructions.iter() {
             match ins.opcode {
                 Opcode::Plugin(ref name) => {
                     // if there are no plugins, we can't handle the opcode
@@ -38,6 +56,7 @@ impl CompiledProgram {
                             err_msg,
                             name.to_string().to_lowercase()
                         );
+                        continue;
                     }
                     let mut found = false;
                     for plugin in loader.plugins.iter_mut() {
@@ -59,6 +78,11 @@ impl CompiledProgram {
                 _ => {}
             }
         }
+        self.plugins = program.plugins.clone();
+        let (base, memory) = Self::remap(program);
+        self.program = memory.raw();
+        self.start_address = base;
+        self.memory_address = memory.address();
         if !err_msg.is_empty() {
             return Err(err_msg);
         }
@@ -66,10 +90,88 @@ impl CompiledProgram {
         Ok(bytes)
     }
 
-    pub fn from_compiled(input: Vec<u8>) -> Self {
+    fn remap(program: Program) -> (usize, Memory) {
+        let mut memory = Memory::new();
+        // loop through program, get all literals/instructions, remap into existing memory space.
+        let mut literal_list: BTreeMap<String, usize> = BTreeMap::new();
+        for (label, value) in program.labels.list.iter() {
+            match value {
+                LabelValue::Literal(value) => {
+                    // store in memory.
+                    let address = memory.push(value.as_bytes(), true);
+                    literal_list.insert(label.clone(), address);
+                }
+                LabelValue::Address(address) => {
+                    // these addresses need to be relocated to the new memory space. start_address + (address * 128).
+                    literal_list.insert(label.clone(), *address * 16);
+                }
+            }
+        }
+
+        for instruction in program.instructions.iter() {
+            match &instruction.opcode {
+                Opcode::Plugin(plugin) => {
+                    match plugin {
+                        opvm2::opcode::PluginValue::None => {}
+                        opvm2::opcode::PluginValue::Name(name) => {
+                            // store the name of the plugin in memory.
+                            let address = memory.push(name.as_bytes(), true);
+                            literal_list.insert(name.clone(), address);
+                        }
+                        opvm2::opcode::PluginValue::Address(_) => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let start_address = memory.address();
+        for instruction in program.instructions.iter() {
+            let encoded = instruction.encode(&literal_list);
+            memory.push(&Self::get_u8_array(encoded), false);
+        }
+
+        (start_address, memory)
+    }
+
+    fn get_u8_array(data: u128) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for i in 0..16 {
+            let byte = (data >> (i * 8)) as u8;
+            bytes.push(byte);
+        }
+        bytes
+    }
+}
+
+impl From<Vec<u8>> for CompiledProgram {
+    fn from(input: Vec<u8>) -> Self {
         let program = CompiledProgram::from_bytes(&input);
         match program {
             Ok(program) => program,
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+}
+
+impl From<Program> for CompiledProgram {
+    fn from(program: Program) -> Self {
+        let mut compiled = CompiledProgram::new_e();
+        let output = compiled.compile(program, false);
+        match output {
+            Ok(_) => compiled,
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+}
+
+impl From<&str> for CompiledProgram {
+    fn from(str: &str) -> Self {
+        let program = Program::from(str);
+        let mut compiled = CompiledProgram::new_e();
+        let output = compiled.compile(program, false);
+        match output {
+            Ok(_) => compiled,
             Err(e) => panic!("Error: {}", e),
         }
     }
@@ -97,7 +199,7 @@ mod test {
             add ra, rb
         ",
         );
-        vm.run(program)?;
+        vm.run_program(program)?;
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 3);
         Ok(())
     }
@@ -111,7 +213,7 @@ mod test {
             inc ra
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 2);
     }
 
@@ -124,7 +226,7 @@ mod test {
             dec ra
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 0);
     }
 
@@ -138,7 +240,7 @@ mod test {
             xor ra, rb
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 6);
     }
 
@@ -152,7 +254,7 @@ mod test {
             pop rb
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rb), 1);
     }
 
@@ -168,7 +270,7 @@ mod test {
             pop rc
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rb), 5);
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 5);
     }
@@ -178,14 +280,14 @@ mod test {
         let mut vm = super::vm::Vm::new_e();
         let program = Program::from(
             r"
-            mov r0, 4
+            mov r0, 64
             jmp r0
             mov ra, 2   ; this should be skipped
             mov rb, 3   ; this should be skipped
             mov rc, 5
         ",
         );
-        vm.run(program)?;
+        vm.run_program(program)?;
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 0);
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rb), 0);
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 5);
@@ -203,8 +305,7 @@ mod test {
             _start: mov rc, 5
         ",
         );
-        println!("{:?}", program);
-        vm.run(program)?;
+        vm.run_program(program)?;
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 0);
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rb), 0);
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 5);
@@ -226,7 +327,7 @@ mod test {
             _exit:
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 10);
     }
 
@@ -245,7 +346,7 @@ mod test {
             _exit:
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 10);
     }
 
@@ -264,7 +365,7 @@ mod test {
             _exit:
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 10);
     }
 
@@ -283,7 +384,7 @@ mod test {
             _exit:
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 10);
     }
 
@@ -302,7 +403,7 @@ mod test {
             _exit:
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 10);
     }
 
@@ -321,7 +422,7 @@ mod test {
             _exit:
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rc), 10);
     }
 
@@ -341,7 +442,7 @@ mod test {
             mov rd, 6
         ",
         );
-        vm.run(program).unwrap();
+        vm.run_program(program).unwrap();
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Ra), 7);
         assert_eq!(read_registers(&vm).get(&crate::register::Register::Rd), 6);
         assert_ne!(read_registers(&vm).get(&crate::register::Register::Rc), 5);

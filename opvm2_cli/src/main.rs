@@ -30,17 +30,11 @@ fn compress(input: Vec<u8>, output_file: String) -> Result<(), String> {
     Ok(())
 }
 
-fn run_interpreter(
-    vm: &mut Vm,
-    path: String,
-    plugins: Vec<Vec<u8>>,
-    verbose: bool,
-) -> Result<(), String> {
+fn run_interpreter(vm: &mut Vm, path: String, plugins: Vec<Vec<u8>>) -> Result<(), String> {
     let file_content = std::fs::read_to_string(path).unwrap();
-    let program = Program::from(file_content.as_str());
-    // load all plugins
-    vm.plugin.load_all(plugins, verbose)?;
-    vm.run(program)?;
+    let mut program = Program::from(file_content.as_str());
+    program.plugins = plugins;
+    vm.run_program(program)?;
     Ok(())
 }
 
@@ -58,19 +52,18 @@ fn run_compiled_program(vm: &mut Vm, path: String, verbose: bool) -> Result<(), 
     let mut decoder = Decoder::new(input_file).map_err(|e| e.to_string())?;
     let mut buffer: Vec<u8> = Vec::new();
     std::io::copy(&mut decoder, &mut buffer).map_err(|e| e.to_string())?;
-    let compiled = CompiledProgram::from_compiled(buffer);
-    // load any plugins
-    vm.plugin.load_all(compiled.plugins, verbose)?;
-    vm.run(compiled.program).unwrap();
+    let compiled = CompiledProgram::from(buffer);
+    vm.run(compiled).unwrap();
     Ok(())
 }
 
 fn compile(path: String, plugins: Vec<Vec<u8>>, verbose: bool) -> Result<(), String> {
     let file_content = std::fs::read_to_string(&path).unwrap();
-    let program = Program::from(file_content.as_str());
-    let to_compile = CompiledProgram::new(program, plugins);
+    let mut program = Program::from(file_content.as_str());
+    program.plugins = plugins;
+    let mut to_compile = CompiledProgram::new_e();
 
-    let compiled = to_compile.compile(verbose)?;
+    let compiled = to_compile.compile(program, verbose)?;
 
     compress(
         compiled,
@@ -98,7 +91,7 @@ fn main() -> Result<(), String> {
     let plugins = load_plugins(args.plugin)?;
 
     if args.interpret {
-        run_interpreter(&mut vm, args.file, plugins, args.verbose)?;
+        run_interpreter(&mut vm, args.file, plugins)?;
         return Ok(());
     }
 

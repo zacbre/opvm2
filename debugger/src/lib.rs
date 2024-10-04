@@ -14,7 +14,7 @@ pub fn name() -> FnResult<String> {
 // todo: handle_error should be implemented
 // todo: also implement handle_post_instruction
 
-static mut BREAKPOINTS: Vec<u64> = vec![];
+static mut BREAKPOINTS: Vec<usize> = vec![];
 static mut STEP: bool = true;
 
 #[plugin_fn]
@@ -35,14 +35,14 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
         let input = input.trim_end_matches('\n');
         if input.starts_with("bp") {
             let bp = input.split_whitespace().nth(1).unwrap();
-            let pc: u64 = bp.parse::<u64>()?;
+            let pc: usize = bp.parse::<usize>()?;
             unsafe { BREAKPOINTS.push(pc) };
             unsafe { print(format!("Added breakpoint at {}\n", bp))? }
             continue;
         }
         if input.starts_with("dbp") {
             let bp = input.split_whitespace().nth(1).unwrap();
-            let pc: u64 = bp.parse::<u64>()?;
+            let pc: usize = bp.parse::<usize>()?;
             let index = unsafe { BREAKPOINTS.iter().position(|&x| x == pc) };
             if index.is_none() {
                 unsafe { print(format!("Breakpoint not found!\n"))? };

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::BTreeMap, fmt::Display};
 
 use extism_pdk::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,25 @@ pub enum Opcode {
     Sleep,
     Nop,
     Halt,
-    Plugin(String),
+    Plugin(PluginValue),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
+#[encoding(Json)]
+pub enum PluginValue {
+    None,
+    Name(String),
+    Address(u32),
+}
+
+impl Display for PluginValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Name(name) => write!(f, "{}", name),
+            Self::Address(address) => write!(f, "{}", address),
+        }
+    }
 }
 
 impl Opcode {
@@ -48,10 +66,17 @@ impl Opcode {
         }
     }
 
-    pub fn get_plugin_opcode(&self) -> String {
+    pub fn get_plugin_address(&self, literal_map: &BTreeMap<String, usize>) -> u32 {
         match &self {
-            Self::Plugin(name) => name.clone(),
-            _ => String::new(),
+            Self::Plugin(val) => match val {
+                PluginValue::Address(address) => return *address,
+                PluginValue::Name(name) => {
+                    let address = literal_map.get(name).unwrap();
+                    *address as u32
+                }
+                _ => panic!("Plugin value is not an address or name"),
+            },
+            _ => panic!("Opcode is not a plugin"),
         }
     }
 
@@ -84,8 +109,8 @@ impl Opcode {
             Self::Sleep => 24,
             Self::Nop => 25,
             Self::Halt => 26,
+            Self::Plugin(_) => 27,
             _ => 25, // anything else is nop rn
-                     //Self::Plugin(_) => 27, again, going to have to do something about this.
         }
     }
 
@@ -118,9 +143,8 @@ impl Opcode {
             24 => Opcode::Sleep,
             25 => Opcode::Nop,
             26 => Opcode::Halt,
+            27 => Self::Plugin(PluginValue::None),
             _ => Opcode::Nop,
-            //27 => Self::Plugin(str), // todo: this can't exist in the current state because the plugin will need to have a string passed.
-            // idea: in the future, probably map the plugin to a literal and pass it as part of the opcode, idk how yet.
         }
     }
 }
@@ -155,8 +179,7 @@ impl From<String> for Opcode {
             "sleep" => Self::Sleep,
             "nop" => Self::Nop,
             "hlt" => Self::Halt,
-            _ => Self::Plugin(value),
-            // todo: add ability to extend with extism? check if the instruction exists.
+            _ => Self::Plugin(PluginValue::Name(value)),
         }
     }
 }
@@ -191,7 +214,7 @@ impl Display for Opcode {
             Self::Sleep => write!(f, "sleep"),
             Self::Nop => write!(f, "nop"),
             Self::Halt => write!(f, "hlt"),
-            Self::Plugin(s) => write!(f, "{}", s),
+            Self::Plugin(s) => write!(f, "{}", s.to_string()),
         }
     }
 }
