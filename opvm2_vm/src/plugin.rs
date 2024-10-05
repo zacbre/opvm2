@@ -177,6 +177,7 @@ host_fn!(pub get_input(user_data: MachineContext;) -> Result<String, String> {
 host_fn!(pub jmp_to_label(user_data: MachineContext; label: String) -> Result<(), String> {
     let context = user_data.get()?;
     let mut context = context.lock().unwrap();
+    //
     // let address = context.current_program.labels.list.get(&label);
     // if address.is_none() {
     //     return Err(extism::Error::msg(format!("Label '{}' does not exist!", &label)))

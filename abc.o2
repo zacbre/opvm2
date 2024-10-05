@@ -1,8 +1,17 @@
-main: mov ra, 26    ; length of the alphabet
-       mov rb, 97    ; start position of ASCII table
-       add ra, rb
+text: 'This is some text!'
+main: mov ra, 26
+      mov rb, 65
+      add ra, rb
 loop: print_ascii rb
-       inc rb
-       test rb, ra
-       jl loop
-end:
+      inc rb
+      test rb, ra
+      jl loop
+      test rb, 123
+      jge end
+      print_ascii 10
+      mov rb, 97
+      mov ra, 26
+      add ra, rb
+      jmp loop
+end:  print_ascii 10
+      print_ascii text
