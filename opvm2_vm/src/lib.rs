@@ -7,6 +7,7 @@ pub mod vm;
 use std::collections::BTreeMap;
 
 use extism::{convert::Json, FromBytes, ToBytes, UserData};
+use instruction::Instruction;
 use machine_context::MachineContext;
 use memory::Memory;
 use opvm2::{opcode::Opcode, parser::program::Program, *};
@@ -135,19 +136,10 @@ impl CompiledProgram {
         let start_address = memory.address();
         for instruction in program.instructions.iter() {
             let encoded = instruction.encode(&literal_list);
-            memory.push(&Self::get_u8_array(encoded), false);
+            memory.push(&Instruction::get_u8_array(encoded), false);
         }
 
         (start_address, memory)
-    }
-
-    fn get_u8_array(data: u128) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        for i in 0..16 {
-            let byte = (data >> (i * 8)) as u8;
-            bytes.push(byte);
-        }
-        bytes
     }
 }
 

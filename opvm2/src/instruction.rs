@@ -53,10 +53,6 @@ impl Instruction {
     // [0-32] = number
     // [0-32] = address
 
-    // the problem with this, is we need to be able to pass in the addresses for plugin opcode, and literals mapped later.
-    // actually, maybe we can just pass in a literal "map" that shows where each one was mapped to? and have that map
-    // just be label offset => address, so we can resolve them here.
-    // idk if i like this literal map, because we only get passed the label...we need a way to store these addresses in memory at this point?
     pub fn encode(&self, literal_map: &BTreeMap<String, usize>) -> u128 {
         let mut instruction = 0u128;
         instruction |= (self.opcode.to_u8() as u128) << 122;
@@ -110,6 +106,15 @@ impl Instruction {
             }
             _ => Instruction::new_e(opcode),
         }
+    }
+
+    pub fn get_u8_array(data: u128) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for i in 0..16 {
+            let byte = (data >> (i * 8)) as u8;
+            bytes.push(byte);
+        }
+        bytes
     }
 
     fn operand_count(&self) -> u8 {

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::MutexGuard};
+use std::sync::MutexGuard;
 
 use extism::UserData;
 use opvm2::{

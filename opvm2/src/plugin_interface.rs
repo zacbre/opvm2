@@ -1,4 +1,5 @@
 use crate::{
+    instruction::Instruction,
     opcode::Opcode,
     operand::Operand,
     register::{Register, Registers},
@@ -41,6 +42,5 @@ extern "ExtismHost" {
     pub fn get_labels() -> Labels;
     pub fn quit();
     pub fn print(value: String);
-    // todo: add a function to execute instructions within the vm...perhaps we have to patch current_program
-    //pub fn execute_instruction(Json(ins): Json<OnInstructionValue>) -> Option<usize>;
+    pub fn execute(data: Instruction);
 }

@@ -1,9 +1,12 @@
-use std::{ffi::CString, io::Write};
+use std::{collections::BTreeMap, ffi::CString, io::Write};
 
-use convert::Json;
 use extism::*;
-use opvm2::plugin_interface::{Label, Labels, OnInstructionValue};
-use serde::{Deserialize, Serialize};
+use opvm2::{
+    instruction::Instruction,
+    opcode::Opcode,
+    parser::program::LabelValue,
+    plugin_interface::{Label, Labels, OnInstructionValue},
+};
 
 use crate::{machine_context::MachineContext, register::Register};
 
@@ -123,6 +126,7 @@ impl PluginLoader {
             .with_function("get_labels", [], [PTR], self.context.clone(), get_labels)
             .with_function("quit", [], [], self.context.clone(), quit)
             .with_function("print", [PTR], [], self.context.clone(), print)
+            .with_function("execute", [PTR], [], self.context.clone(), execute)
             .build()
             .unwrap();
         if !plugin.function_exists("name") {
@@ -215,6 +219,24 @@ host_fn!(pub print(user_data: MachineContext; data: String) -> Result<(), String
    print!("{}", data);
    std::io::stdout().flush()?;
    Ok(())
+});
+
+host_fn!(pub execute(user_data: MachineContext; data: Instruction) -> Result<(), String> {
+    let context = user_data.get()?;
+    let mut context = context.lock().unwrap();
+    let empty_map: BTreeMap<String, usize> = BTreeMap::new();
+    let base = context.base_address;
+    let current_end = context.memory.address();
+    let current_pc = *context.registers.check_pc();
+
+    // insert a jump at the beginning and at the end
+    // the beginning ensures we never hit this routine again.
+    // the end ensures we return to the original location.
+    let jmp_address = context.memory.push(&Instruction::get_u8_array(Instruction::new_l(Opcode::Jmp, opvm2::operand::Operand::Label(LabelValue::Address((current_end - base) + 48))).encode(&empty_map)), false);
+    context.memory.push(&Instruction::get_u8_array(data.encode(&empty_map)), false);
+    context.memory.push(&Instruction::get_u8_array(Instruction::new_l(Opcode::Jmp, opvm2::operand::Operand::Label(LabelValue::Address(current_pc - base))).encode(&empty_map)), false);
+    context.registers.set_pc(jmp_address);
+    Ok(())
 });
 
 #[cfg(test)]
