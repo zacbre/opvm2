@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::BTreeMap, fmt::Display};
 
 use extism_pdk::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,8 @@ pub enum Opcode {
     Jge,
     Jl,
     Jg,
+    Jz,
+    Jnz,
     Call,
     Return,
     /* Various */
@@ -37,7 +39,121 @@ pub enum Opcode {
     Sleep,
     Nop,
     Halt,
-    Plugin(String),
+    Plugin(PluginValue),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
+#[encoding(Json)]
+pub enum PluginValue {
+    None,
+    Name(String),
+    Address(u32),
+}
+
+impl Display for PluginValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Name(name) => write!(f, "{}", name),
+            Self::Address(address) => write!(f, "{}", address),
+        }
+    }
+}
+
+impl Opcode {
+    pub fn is_plugin(&self) -> bool {
+        match &self {
+            Self::Plugin(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_plugin_address(&self, literal_map: &BTreeMap<String, usize>) -> u32 {
+        match &self {
+            Self::Plugin(val) => match val {
+                PluginValue::Address(address) => return *address,
+                PluginValue::Name(name) => {
+                    let address = literal_map.get(name).unwrap();
+                    *address as u32
+                }
+                _ => panic!("Plugin value is not an address or name"),
+            },
+            _ => panic!("Opcode is not a plugin"),
+        }
+    }
+
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            Self::Mov => 0,
+            Self::Add => 1,
+            Self::Sub => 2,
+            Self::Mul => 3,
+            Self::Div => 4,
+            Self::Mod => 5,
+            Self::Xor => 6,
+            Self::Inc => 7,
+            Self::Dec => 8,
+            Self::Push => 9,
+            Self::Pop => 10,
+            Self::Dup => 11,
+            Self::Test => 12,
+            Self::Jmp => 13,
+            Self::Je => 14,
+            Self::Jne => 15,
+            Self::Jle => 16,
+            Self::Jge => 17,
+            Self::Jl => 18,
+            Self::Jg => 19,
+            Self::Jz => 20,
+            Self::Jnz => 21,
+            Self::Call => 22,
+            Self::Return => 23,
+            Self::Assert => 24,
+            Self::Print => 25,
+            Self::Sleep => 26,
+            Self::Nop => 27,
+            Self::Halt => 28,
+            Self::Plugin(_) => 29,
+            #[allow(unreachable_patterns)]
+            _ => 27, // anything else is nop rn
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Opcode {
+        match value {
+            0 => Opcode::Mov,
+            1 => Opcode::Add,
+            2 => Opcode::Sub,
+            3 => Opcode::Mul,
+            4 => Opcode::Div,
+            5 => Opcode::Mod,
+            6 => Opcode::Xor,
+            7 => Opcode::Inc,
+            8 => Opcode::Dec,
+            9 => Opcode::Push,
+            10 => Opcode::Pop,
+            11 => Opcode::Dup,
+            12 => Opcode::Test,
+            13 => Opcode::Jmp,
+            14 => Opcode::Je,
+            15 => Opcode::Jne,
+            16 => Opcode::Jle,
+            17 => Opcode::Jge,
+            18 => Opcode::Jl,
+            19 => Opcode::Jg,
+            20 => Opcode::Jz,
+            21 => Opcode::Jnz,
+            22 => Opcode::Call,
+            23 => Opcode::Return,
+            24 => Opcode::Assert,
+            25 => Opcode::Print,
+            26 => Opcode::Sleep,
+            27 => Opcode::Nop,
+            28 => Opcode::Halt,
+            29 => Self::Plugin(PluginValue::None),
+            _ => Opcode::Nop,
+        }
+    }
 }
 
 impl From<String> for Opcode {
@@ -63,6 +179,8 @@ impl From<String> for Opcode {
             "jge" => Self::Jge,
             "jl" => Self::Jl,
             "jg" => Self::Jg,
+            "jz" => Self::Jz,
+            "jnz" => Self::Jnz,
             "call" => Self::Call,
             "ret" => Self::Return,
             "assert" => Self::Assert,
@@ -70,8 +188,7 @@ impl From<String> for Opcode {
             "sleep" => Self::Sleep,
             "nop" => Self::Nop,
             "hlt" => Self::Halt,
-            _ => Self::Plugin(value),
-            // todo: add ability to extend with extism? check if the instruction exists.
+            _ => Self::Plugin(PluginValue::Name(value)),
         }
     }
 }
@@ -99,6 +216,8 @@ impl Display for Opcode {
             Self::Jge => write!(f, "jge"),
             Self::Jl => write!(f, "jl"),
             Self::Jg => write!(f, "jg"),
+            Self::Jz => write!(f, "jz"),
+            Self::Jnz => write!(f, "jnz"),
             Self::Call => write!(f, "call"),
             Self::Return => write!(f, "ret"),
             Self::Assert => write!(f, "assert"),
@@ -106,7 +225,7 @@ impl Display for Opcode {
             Self::Sleep => write!(f, "sleep"),
             Self::Nop => write!(f, "nop"),
             Self::Halt => write!(f, "hlt"),
-            Self::Plugin(s) => write!(f, "{}", s),
+            Self::Plugin(s) => write!(f, "{}", s.to_string()),
         }
     }
 }

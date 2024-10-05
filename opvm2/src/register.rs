@@ -21,6 +21,50 @@ pub enum Register {
     R8,
     R9,
 }
+impl Register {
+    pub fn encode(&self) -> u32 {
+        match self {
+            Self::Ra => 0,
+            Self::Rb => 1,
+            Self::Rc => 2,
+            Self::Rd => 3,
+            Self::Re => 4,
+            Self::Rf => 5,
+            Self::R0 => 6,
+            Self::R1 => 7,
+            Self::R2 => 8,
+            Self::R3 => 9,
+            Self::R4 => 10,
+            Self::R5 => 11,
+            Self::R6 => 12,
+            Self::R7 => 13,
+            Self::R8 => 14,
+            Self::R9 => 15,
+        }
+    }
+
+    pub fn decode(value: u32) -> Register {
+        match value {
+            0 => Self::Ra,
+            1 => Self::Rb,
+            2 => Self::Rc,
+            3 => Self::Rd,
+            4 => Self::Re,
+            5 => Self::Rf,
+            6 => Self::R0,
+            7 => Self::R1,
+            8 => Self::R2,
+            9 => Self::R3,
+            10 => Self::R4,
+            11 => Self::R5,
+            12 => Self::R6,
+            13 => Self::R7,
+            14 => Self::R8,
+            15 => Self::R9,
+            _ => panic!("Bad register format! {:X}", value),
+        }
+    }
+}
 
 macro_rules! flag_register {
     ($e:expr,bool) => {
@@ -52,28 +96,29 @@ macro_rules! flag_register {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToBytes, FromBytes)]
 #[encoding(Json)]
 pub struct Registers {
-    pub ra: u64,
-    pub rb: u64,
-    pub rc: u64,
-    pub rd: u64,
-    pub re: u64,
-    pub rf: u64,
-    pub r0: u64,
-    pub r1: u64,
-    pub r2: u64,
-    pub r3: u64,
-    pub r4: u64,
-    pub r5: u64,
-    pub r6: u64,
-    pub r7: u64,
-    pub r8: u64,
-    pub r9: u64,
+    pub ra: usize,
+    pub rb: usize,
+    pub rc: usize,
+    pub rd: usize,
+    pub re: usize,
+    pub rf: usize,
+    pub r0: usize,
+    pub r1: usize,
+    pub r2: usize,
+    pub r3: usize,
+    pub r4: usize,
+    pub r5: usize,
+    pub r6: usize,
+    pub r7: usize,
+    pub r8: usize,
+    pub r9: usize,
     equals_flag: bool,
     greater_than_flag: bool,
     less_than_flag: bool,
-    stack_len: u64,
-    call_stack_len: u64,
-    pc: u64,
+    zero_flag: bool,
+    stack_len: usize,
+    call_stack_len: usize,
+    pc: usize,
 }
 
 impl Registers {
@@ -98,13 +143,14 @@ impl Registers {
             equals_flag: false,
             greater_than_flag: false,
             less_than_flag: false,
+            zero_flag: false,
             stack_len: 0,
             call_stack_len: 0,
             pc: 0,
         }
     }
 
-    pub fn get(&self, register: &Register) -> u64 {
+    pub fn get(&self, register: &Register) -> usize {
         match register {
             Register::Ra => self.ra,
             Register::Rb => self.rb,
@@ -125,7 +171,7 @@ impl Registers {
         }
     }
 
-    pub fn set(&mut self, register: &Register, value: u64) {
+    pub fn set(&mut self, register: &Register, value: usize) {
         match register {
             Register::Ra => self.ra = value,
             Register::Rb => self.rb = value,
@@ -149,18 +195,20 @@ impl Registers {
     flag_register!(equals_flag, bool);
     flag_register!(greater_than_flag, bool);
     flag_register!(less_than_flag, bool);
-    flag_register!(stack_len, u64);
-    flag_register!(call_stack_len, u64);
-    flag_register!(pc, u64);
+    flag_register!(zero_flag, bool);
+    flag_register!(stack_len, usize);
+    flag_register!(call_stack_len, usize);
+    flag_register!(pc, usize);
 
     pub fn increment_pc(&mut self) {
-        self.pc += 1;
+        self.pc += 16; // increment size of instruction
     }
 
     pub fn reset_flags(&mut self) {
         self.equals_flag = false;
         self.greater_than_flag = false;
         self.less_than_flag = false;
+        self.zero_flag = false;
     }
 }
 

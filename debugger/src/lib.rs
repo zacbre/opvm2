@@ -1,7 +1,9 @@
 use extism_pdk::*;
 use opvm2::{
+    parser::program::Program,
     plugin_interface::{
-        all_registers, get_input, get_labels, print, quit, set_register, OnInstructionValue,
+        all_registers, execute, get_input, get_labels, print, quit, set_register,
+        OnInstructionValue,
     },
     register::Register,
 };
@@ -14,11 +16,18 @@ pub fn name() -> FnResult<String> {
 // todo: handle_error should be implemented
 // todo: also implement handle_post_instruction
 
-static mut BREAKPOINTS: Vec<u64> = vec![];
+static mut BREAKPOINTS: Vec<usize> = vec![];
 static mut STEP: bool = true;
+static mut FIRST_RUN: bool = false;
 
 #[plugin_fn]
 pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
+    if !unsafe { FIRST_RUN } {
+        unsafe { FIRST_RUN = true };
+        unsafe { print(format!("Welcome to the debugger!\n"))? };
+        unsafe { print(format!("Type 'help' for a list of commands\n"))? };
+        //unsafe { print(format!("Program length: {:?}", ))}
+    }
     // let us use a basic interpreter, powered by the VM itself? whoa
     loop {
         unsafe {
@@ -35,14 +44,14 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
         let input = input.trim_end_matches('\n');
         if input.starts_with("bp") {
             let bp = input.split_whitespace().nth(1).unwrap();
-            let pc: u64 = bp.parse::<u64>()?;
+            let pc: usize = bp.parse::<usize>()?;
             unsafe { BREAKPOINTS.push(pc) };
             unsafe { print(format!("Added breakpoint at {}\n", bp))? }
             continue;
         }
         if input.starts_with("dbp") {
             let bp = input.split_whitespace().nth(1).unwrap();
-            let pc: u64 = bp.parse::<u64>()?;
+            let pc: usize = bp.parse::<usize>()?;
             let index = unsafe { BREAKPOINTS.iter().position(|&x| x == pc) };
             if index.is_none() {
                 unsafe { print(format!("Breakpoint not found!\n"))? };
@@ -66,6 +75,30 @@ pub fn handle_instruction(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
             unsafe { set_register(register, value)? };
             unsafe { print(format!("Set register {} to {}!\n", p_register, value))? }
             continue;
+        }
+        if input.starts_with("ins") {
+            let program = Program::from(&input[3..]);
+            let instruction = program.instructions[0].clone();
+
+            unsafe {
+                execute(instruction)?;
+            }
+            unsafe { STEP = true };
+            return Ok(None);
+        }
+        if input.starts_with("in") {
+            let program = Program::from(&input[3..]);
+            let instruction = program.instructions[0].clone();
+            let pc = *unsafe { all_registers()? }.check_pc();
+            unsafe {
+                BREAKPOINTS.push(pc);
+            }
+
+            unsafe {
+                execute(instruction)?;
+            }
+            unsafe { STEP = false };
+            return Ok(None);
         }
         match input {
             "x" => {

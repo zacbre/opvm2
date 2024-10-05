@@ -23,6 +23,20 @@ pub struct LabelWithLiteral {
 #[derive(Debug, PartialEq)]
 pub struct Expression {
     pub opcode: String,
-    pub lhs: Option<String>,
+    pub lhs: SideType,
+    pub rhs: SideType,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SideType {
+    None,
+    Normal(String),
+    Offset(ExpressionOffset),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ExpressionOffset {
+    pub lhs: String,
+    pub operator: Option<String>,
     pub rhs: Option<String>,
 }

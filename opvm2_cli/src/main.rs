@@ -18,6 +18,8 @@ struct Args {
     interpret: bool,
     #[arg(short, long)]
     plugin: Vec<String>,
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 fn compress(input: Vec<u8>, output_file: String) -> Result<(), String> {
@@ -30,10 +32,9 @@ fn compress(input: Vec<u8>, output_file: String) -> Result<(), String> {
 
 fn run_interpreter(vm: &mut Vm, path: String, plugins: Vec<Vec<u8>>) -> Result<(), String> {
     let file_content = std::fs::read_to_string(path).unwrap();
-    let program = Program::from(file_content.as_str());
-    // load all plugins
-    vm.plugin.load_all(plugins)?;
-    vm.run(program)?;
+    let mut program = Program::from(file_content.as_str());
+    program.plugins = plugins;
+    vm.run_program(program)?;
     Ok(())
 }
 
@@ -51,19 +52,18 @@ fn run_compiled_program(vm: &mut Vm, path: String) -> Result<(), String> {
     let mut decoder = Decoder::new(input_file).map_err(|e| e.to_string())?;
     let mut buffer: Vec<u8> = Vec::new();
     std::io::copy(&mut decoder, &mut buffer).map_err(|e| e.to_string())?;
-    let compiled = CompiledProgram::from_compiled(buffer);
-    // load any plugins
-    vm.plugin.load_all(compiled.plugins)?;
-    vm.run(compiled.program).unwrap();
+    let compiled = CompiledProgram::from(buffer);
+    vm.run(compiled).unwrap();
     Ok(())
 }
 
-fn compile(path: String, plugins: Vec<Vec<u8>>) -> Result<(), String> {
+fn compile(path: String, plugins: Vec<Vec<u8>>, verbose: bool) -> Result<(), String> {
     let file_content = std::fs::read_to_string(&path).unwrap();
-    let program = Program::from(file_content.as_str());
-    let to_compile = CompiledProgram::new(program, plugins);
+    let mut program = Program::from(file_content.as_str());
+    program.plugins = plugins;
+    let mut to_compile = CompiledProgram::new_e();
 
-    let compiled = to_compile.compile()?;
+    let compiled = to_compile.compile(program, verbose)?;
 
     compress(
         compiled,
@@ -81,7 +81,10 @@ fn main() -> Result<(), String> {
 
     if args.debug {
         vm.plugin
-            .load_from_path("target/wasm32-unknown-unknown/debug/debugger.wasm")
+            .load_from_path(
+                "target/wasm32-unknown-unknown/release/debugger.wasm",
+                args.verbose,
+            )
             .unwrap();
     }
 
@@ -94,10 +97,12 @@ fn main() -> Result<(), String> {
 
     if args.compile {
         let now = Instant::now();
-        compile(args.file, plugins)?;
+        compile(args.file, plugins, args.verbose)?;
         let end = now.elapsed();
 
-        println!("Compiled in {} ms", end.as_millis());
+        if args.verbose {
+            println!("Compiled in {} ms", end.as_millis());
+        }
         return Ok(());
     }
 

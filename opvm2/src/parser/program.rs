@@ -3,12 +3,16 @@ use std::collections::BTreeMap;
 use extism_pdk::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
 
-use crate::{instruction::Instruction, lexer::token::Token, operand::Operand};
+use crate::{
+    instruction::Instruction,
+    lexer::token::{SideType, Token},
+    operand::{Offset, Operand},
+};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromBytes, ToBytes, Clone)]
 #[encoding(Json)]
 pub enum LabelValue {
-    Address(u64),
+    Address(usize),
     Literal(String),
 }
 
@@ -39,6 +43,7 @@ impl From<Vec<(String, LabelValue)>> for Labels {
 pub struct Program {
     pub instructions: Vec<Instruction>,
     pub labels: Labels,
+    pub plugins: Vec<Vec<u8>>,
 }
 
 impl Program {
@@ -59,6 +64,7 @@ impl Program {
     }
 
     fn tokens_to_program(tokens: Vec<Vec<Token>>) -> Result<Self, String> {
+        // make an instruction, then convert said instruction into bytecode.
         let mut instructions = Vec::new();
         let mut labels: Labels = Labels {
             list: Default::default(),
@@ -71,30 +77,25 @@ impl Program {
                         // mark the location at which the label is located at, use instructions.len()
                         labels
                             .list
-                            .insert(l, LabelValue::Address(instructions.len() as u64));
+                            .insert(l, LabelValue::Address(instructions.len()));
                     }
                     Token::LabelWithLiteral(l) => {
                         // see if we can parse the l.value as a number
-                        if let Ok(val) = l.value.parse::<u64>() {
+                        if let Ok(val) = l.value.parse::<usize>() {
                             labels.list.insert(l.name, LabelValue::Address(val));
                             continue;
                         }
 
+                        // todo, get rid of this "literal" space and make it an address always after mapping.
                         labels.list.insert(l.name, LabelValue::Literal(l.value));
                     }
                     Token::Directive(_) => todo!(),
                     Token::Expression(e) => {
-                        let lhs = match e.lhs {
-                            Some(lhs) => lhs.try_into()?,
-                            None => Operand::None,
-                        };
-                        let rhs = match e.rhs {
-                            Some(rhs) => rhs.try_into()?,
-                            None => Operand::None,
-                        };
+                        let lhs = Self::parse_side_type(e.lhs)?;
+                        let rhs = Self::parse_side_type(e.rhs)?;
                         let instruction = Instruction::new(e.opcode.into(), lhs, rhs);
                         instructions.push(instruction);
-                    }
+                    } // will require multiple passes if the labels are not defined in order (above the expression it's used in.)
                     _ => (),
                 }
             }
@@ -102,6 +103,19 @@ impl Program {
         Ok(Program {
             instructions,
             labels,
+            plugins: vec![],
+        })
+    }
+
+    fn parse_side_type(s: SideType) -> Result<Operand, String> {
+        Ok(match s {
+            SideType::Normal(rhs) => rhs.try_into()?,
+            SideType::Offset(offset) => Operand::Offset(Offset {
+                lhs_operand: offset.lhs,
+                operator: offset.operator,
+                rhs_operand: offset.rhs,
+            }),
+            SideType::None => Operand::None,
         })
     }
 
@@ -109,6 +123,7 @@ impl Program {
         Program {
             instructions: vec![],
             labels: Labels::new(),
+            plugins: vec![],
         }
     }
 }
@@ -117,7 +132,7 @@ impl Program {
 mod test {
     use super::Token;
     use super::*;
-    use crate::lexer::token::{Expression, LabelWithLiteral};
+    use crate::lexer::token::{Expression, ExpressionOffset, LabelWithLiteral};
     use crate::opcode::Opcode;
     use crate::operand::Operand;
     use crate::register::Register;
@@ -128,13 +143,13 @@ mod test {
             Program::new(vec![
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("1".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("rb".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("rb".to_string()),
                 })],
             ]),
             Program {
@@ -151,6 +166,7 @@ mod test {
                     ),
                 ],
                 labels: Labels::new(),
+                plugins: vec![]
             }
         )
     }
@@ -162,13 +178,13 @@ mod test {
                 vec![Token::Label("start".to_string())],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("1".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("rb".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("rb".to_string()),
                 })],
                 vec![Token::Label("end".to_string())],
             ]),
@@ -188,7 +204,8 @@ mod test {
                 labels: Labels::from(vec![
                     ("start".to_string(), LabelValue::Address(0)),
                     ("end".to_string(), LabelValue::Address(2))
-                ])
+                ]),
+                plugins: vec![]
             }
         )
     }
@@ -207,13 +224,13 @@ mod test {
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "mov".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("1".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("1".to_string()),
                 })],
                 vec![Token::Expression(Expression {
                     opcode: "add".to_string(),
-                    lhs: Some("ra".to_string()),
-                    rhs: Some("rb".to_string()),
+                    lhs: SideType::Normal("ra".to_string()),
+                    rhs: SideType::Normal("rb".to_string()),
                 })],
                 vec![Token::Label("end".to_string())],
             ]),
@@ -237,8 +254,62 @@ mod test {
                         LabelValue::Literal("this is my custom value".to_string())
                     ),
                     ("end".to_string(), LabelValue::Address(2))
-                ])
+                ]),
+                plugins: vec![]
             }
         )
+    }
+
+    #[test]
+    fn can_parse_expressions_with_offsets() {
+        assert_eq!(
+            Program::new(vec![vec![Token::Expression(Expression {
+                opcode: "mov".to_string(),
+                lhs: SideType::Normal("ra".to_string()),
+                rhs: SideType::Offset(ExpressionOffset {
+                    lhs: "rb".to_string(),
+                    operator: Some("+".to_string()),
+                    rhs: Some("1".to_string()),
+                }),
+            })],]),
+            Program {
+                instructions: vec![Instruction::new(
+                    Opcode::Mov,
+                    Operand::Register(Register::Ra),
+                    Operand::Offset(Offset {
+                        lhs_operand: "rb".to_string(),
+                        operator: Some("+".to_string()),
+                        rhs_operand: Some("1".to_string()),
+                    })
+                ),],
+                labels: Labels::new(),
+                plugins: vec![]
+            }
+        );
+
+        assert_eq!(
+            Program::new(vec![vec![Token::Expression(Expression {
+                opcode: "mov".to_string(),
+                lhs: SideType::Normal("ra".to_string()),
+                rhs: SideType::Offset(ExpressionOffset {
+                    lhs: "rb".to_string(),
+                    operator: None,
+                    rhs: None,
+                }),
+            })],]),
+            Program {
+                instructions: vec![Instruction::new(
+                    Opcode::Mov,
+                    Operand::Register(Register::Ra),
+                    Operand::Offset(Offset {
+                        lhs_operand: "rb".to_string(),
+                        operator: None,
+                        rhs_operand: None,
+                    })
+                ),],
+                labels: Labels::new(),
+                plugins: vec![]
+            }
+        );
     }
 }

@@ -1,8 +1,0 @@
-_main: mov ra, 26    ; length of the alphabet
-       mov rb, 97    ; start position of ASCII table
-       add ra, rb
-_loop: print_ascii rb
-       inc rb
-       test rb, ra
-       jl loop
-_end:

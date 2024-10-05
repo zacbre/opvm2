@@ -1,5 +1,0 @@
-loop: add ra, end
-      print ra
-      test ra, 10
-      jl loop
-end:  nop

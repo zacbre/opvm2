@@ -1,6 +1,7 @@
 use extism_pdk::*;
 use opvm2::{
-    parser::program::Labels,
+    operand::Operand,
+    parser::program::LabelValue,
     plugin_interface::*,
     register::{Register, Registers},
 };
@@ -64,23 +65,44 @@ pub fn handle_life(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>>
 
 #[plugin_fn]
 pub fn handle_print_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
-    // convert u64 to ascii
+    // convert usize to ascii
     // check if it's a number or a register
-    if let Ok(value) = ins.lhs.get_number() {
-        unsafe {
-            print((value as u8 as char).into())?;
+    match ins.lhs {
+        Operand::Register(r) => {
+            let register = unsafe { get_register(r)? };
+            unsafe {
+                print((register as u8 as char).into())?;
+            }
         }
-    } else {
-        let value = unsafe {
-            get_register(
-                ins.lhs
-                    .get_register()
-                    .map_err(|e| extism_pdk::Error::msg(e.to_string()))?,
-            )?
-        };
-        unsafe {
+        Operand::Number(value) => unsafe {
             print((value as u8 as char).into())?;
-        }
-    };
+        },
+        Operand::Label(label) => match label {
+            LabelValue::Address(address) => unsafe {
+                let _ = get_labels()?
+                    .list
+                    .iter()
+                    .find(|l| l.address == address)
+                    .map(|l| print(l.name.clone().into()))
+                    .ok_or_else(|| extism_pdk::Error::msg("Label not found"))?;
+            },
+            LabelValue::Literal(literal) => unsafe {
+                print((literal).into())?;
+            },
+        },
+        _ => {}
+    }
+    Ok(None)
+}
+
+#[plugin_fn]
+pub fn handle_len(Json(ins): Json<OnInstructionValue>) -> FnResult<Option<u64>> {
+    let register = ins
+        .lhs
+        .get_register()
+        .map_err(|e| extism_pdk::Error::msg(e.to_string()))?;
+    let value = unsafe { get_register(register)? };
+    let len = value.to_string().len() as u64;
+    unsafe { set_register(Register::Ra, len)? }
     Ok(None)
 }
