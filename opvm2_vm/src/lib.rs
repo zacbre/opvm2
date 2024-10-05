@@ -95,6 +95,10 @@ impl CompiledProgram {
         // loop through program, get all literals/instructions, remap into existing memory space.
         let mut literal_list: BTreeMap<String, usize> = BTreeMap::new();
         for (label, value) in program.labels.list.iter() {
+            if literal_list.contains_key(label) {
+                continue;
+            }
+
             match value {
                 LabelValue::Literal(value) => {
                     // store in memory.
@@ -114,6 +118,9 @@ impl CompiledProgram {
                     match plugin {
                         opvm2::opcode::PluginValue::None => {}
                         opvm2::opcode::PluginValue::Name(name) => {
+                            if literal_list.contains_key(name) {
+                                continue;
+                            }
                             // store the name of the plugin in memory.
                             let address = memory.push(name.as_bytes(), true);
                             literal_list.insert(name.clone(), address);
