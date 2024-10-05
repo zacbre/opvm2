@@ -1,7 +1,7 @@
 use extism::{convert::Json, FromBytes, ToBytes};
 use serde::{Deserialize, Serialize};
 
-const MAX_MEMORY_SIZE: usize = 1024 * 1024; // max 4GB in 32 bits, but 16MB here for reasons.
+const MAX_MEMORY_SIZE: usize = 1024 * 1024; // 1MB of memory, can be adjustable, but tests get extremely slow with any more.
 
 #[derive(
     Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToBytes, FromBytes, Clone,

@@ -47,7 +47,7 @@ fn load_plugins(plugins: Vec<String>) -> Result<Vec<Vec<u8>>, String> {
     Ok(loaded)
 }
 
-fn run_compiled_program(vm: &mut Vm, path: String, verbose: bool) -> Result<(), String> {
+fn run_compiled_program(vm: &mut Vm, path: String) -> Result<(), String> {
     let input_file = File::open(&path).map_err(|e| e.to_string())?;
     let mut decoder = Decoder::new(input_file).map_err(|e| e.to_string())?;
     let mut buffer: Vec<u8> = Vec::new();
@@ -82,7 +82,7 @@ fn main() -> Result<(), String> {
     if args.debug {
         vm.plugin
             .load_from_path(
-                "target/wasm32-unknown-unknown/debug/debugger.wasm",
+                "target/wasm32-unknown-unknown/release/debugger.wasm",
                 args.verbose,
             )
             .unwrap();
@@ -106,7 +106,7 @@ fn main() -> Result<(), String> {
         return Ok(());
     }
 
-    run_compiled_program(&mut vm, args.file, args.verbose)?;
+    run_compiled_program(&mut vm, args.file)?;
 
     Ok(())
 }

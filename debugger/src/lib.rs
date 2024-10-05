@@ -7,7 +7,6 @@ use opvm2::{
     },
     register::Register,
 };
-use var::get_memory;
 
 #[plugin_fn]
 pub fn name() -> FnResult<String> {

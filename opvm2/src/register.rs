@@ -115,6 +115,7 @@ pub struct Registers {
     equals_flag: bool,
     greater_than_flag: bool,
     less_than_flag: bool,
+    zero_flag: bool,
     stack_len: usize,
     call_stack_len: usize,
     pc: usize,
@@ -142,6 +143,7 @@ impl Registers {
             equals_flag: false,
             greater_than_flag: false,
             less_than_flag: false,
+            zero_flag: false,
             stack_len: 0,
             call_stack_len: 0,
             pc: 0,
@@ -193,6 +195,7 @@ impl Registers {
     flag_register!(equals_flag, bool);
     flag_register!(greater_than_flag, bool);
     flag_register!(less_than_flag, bool);
+    flag_register!(zero_flag, bool);
     flag_register!(stack_len, usize);
     flag_register!(call_stack_len, usize);
     flag_register!(pc, usize);
@@ -205,6 +208,7 @@ impl Registers {
         self.equals_flag = false;
         self.greater_than_flag = false;
         self.less_than_flag = false;
+        self.zero_flag = false;
     }
 }
 

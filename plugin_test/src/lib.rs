@@ -89,7 +89,6 @@ pub fn handle_print_ascii(Json(ins): Json<OnInstructionValue>) -> FnResult<Optio
             LabelValue::Literal(literal) => unsafe {
                 print((literal).into())?;
             },
-            _ => {}
         },
         _ => {}
     }

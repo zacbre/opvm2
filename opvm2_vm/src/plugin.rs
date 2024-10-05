@@ -180,7 +180,7 @@ host_fn!(pub get_input(user_data: MachineContext;) -> Result<String, String> {
 
 host_fn!(pub jmp_to_label(user_data: MachineContext; label: String) -> Result<(), String> {
     let context = user_data.get()?;
-    let mut context = context.lock().unwrap();
+    let context = context.lock().unwrap();
     //
     // let address = context.current_program.labels.list.get(&label);
     // if address.is_none() {
@@ -212,7 +212,9 @@ host_fn!(pub get_labels(user_data: MachineContext;) -> Result<Labels, String> {
 });
 
 host_fn!(pub quit(user_data: MachineContext;) -> Result<(), String> {
-    std::process::exit(0)
+    std::process::exit(0);
+    #[allow(unreachable_code)]
+    {return Ok(());}
 });
 
 host_fn!(pub print(user_data: MachineContext; data: String) -> Result<(), String> {
@@ -279,7 +281,7 @@ mod test {
 
     fn load_vm() -> Vm {
         let context = super::MachineContext::new();
-        let mut vm = crate::vm::Vm::new(context);
+        let vm = crate::vm::Vm::new(context);
         vm
     }
 
@@ -348,7 +350,7 @@ mod test {
 
     #[test]
     fn can_get_labels_and_jmp_to_one() -> Result<(), extism::Error> {
-        let mut vm = run_program(Program::from(
+        let vm = run_program(Program::from(
             r"
             jmp _label
             mov ra, 10

@@ -230,6 +230,22 @@ impl Vm {
                         continue;
                     }
                 }
+                Opcode::Jz => {
+                    if context.registers.check_zero_flag() {
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
+                        continue;
+                    }
+                }
+                Opcode::Jnz => {
+                    if !context.registers.check_zero_flag() {
+                        context
+                            .registers
+                            .set_pc(start_address + lhs.expect("lhs is none"));
+                        continue;
+                    }
+                }
                 Opcode::Call => {
                     let call_stack_pointer = context.registers.check_pc() + 16;
                     context.call_stack.push(call_stack_pointer);
@@ -247,7 +263,7 @@ impl Vm {
                     self.test(&mut context, &item.lhs, &item.rhs);
                     if !context.registers.check_equals_flag() {
                         return Err(format!(
-                            "Assertion failed at ins {}.",
+                            "Assertion failed at ins {:#02X}.",
                             context.registers.check_pc()
                         ));
                     }
@@ -286,6 +302,9 @@ impl Vm {
         }
         if lhs_value > rhs_value {
             context.registers.set_greater_than_flag(true);
+        }
+        if lhs_value == Ok(Some(0)) && rhs_value == Ok(Some(0)) {
+            context.registers.set_zero_flag(true);
         }
     }
 
@@ -999,7 +1018,7 @@ mod test {
         ];
         let labels = vec![("end".to_string(), LabelValue::Address(5))];
         let vm = run_l(input, labels);
-        assert_eq!(vm.unwrap_err(), "Assertion failed at ins 32.".to_string());
+        assert_eq!(vm.unwrap_err(), "Assertion failed at ins 0x20.".to_string());
     }
 
     #[test]
